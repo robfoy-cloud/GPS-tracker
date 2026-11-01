@@ -510,7 +510,12 @@ function net(){ $('net').hidden=navigator.onLine; }
 addEventListener('online',net); addEventListener('offline',net); net();
 new ResizeObserver(()=>document.documentElement.style.setProperty('--dock-h',$('dock').offsetHeight+'px')).observe($('dock'));
 
-if('serviceWorker' in navigator){ navigator.serviceWorker.register('sw.js').catch(()=>{}); }
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('sw.js').catch(()=>{});
+  // A new version took over: reload once to show it, unless a track is being recorded.
+  let reloaded=false;
+  navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(!reloaded && !rec && navigator.serviceWorker.controller){ reloaded=true; location.reload(); } });
+}
 
 initMap();
 startGPS();
