@@ -115,7 +115,8 @@
   <h3>Saved maps</h3>
   <ul class="areas" id="areas"></ul>
   <div class="row"><button class="danger" id="bClear">Delete all offline maps</button></div>
-  <p class="ver">Flightroute version 17 · 1 Nov 2026</p>
+  <div class="row"><button id="bAbout">About &amp; install</button></div>
+  <p class="ver">Flightroute version 18 · 1 Nov 2026</p>
 </section>
 
 <section class="sheet" id="pTracks" hidden aria-labelledby="hTr">
@@ -129,6 +130,63 @@
     <tbody id="tbody"></tbody>
   </table></div>
   <p class="empty" id="trEmpty">No tracks yet. Tap <b>Record track</b> to log your route; it is saved on this phone.</p>
+</section>
+
+<section class="welcome" id="welcome" hidden aria-label="Flightroute">
+  <div class="w-inner">
+    <header class="w-head">
+      <img class="w-icon" src="icons/icon-512.png" alt="" width="112" height="112">
+      <div class="w-title">
+        <h1>Flightroute</h1>
+        <p class="w-sub">Follow your flight on a map that works offline</p>
+        <div class="w-actions">
+          <button class="w-install" id="wInstall">Install</button>
+          <button class="w-web" id="wWeb">Web version</button>
+        </div>
+      </div>
+    </header>
+    <ul class="w-facts" aria-label="At a glance">
+      <li><b>Free</b><span>No ads</span></li>
+      <li><b>Offline</b><span>Maps saved on device</span></li>
+      <li><b>No account</b><span>Data stays with you</span></li>
+      <li><b>iPhone · iPad</b><span>and Android</span></li>
+    </ul>
+    <div class="w-shots" role="list" aria-label="Screenshots">
+      <figure role="listitem"><img src="screenshots/map.jpg" alt="Map of Sicily and Malta with the planned route to Vienna and a blue arrow at Malta" width="390" height="844" loading="lazy"><figcaption>See where you are, even with no signal</figcaption></figure>
+      <figure role="listitem"><img src="screenshots/plan.jpg" alt="Journey planner with flight KM114 filled in, from Malta to London Heathrow, 2,103 km" width="390" height="844" loading="lazy"><figcaption>Plan by flight number or airport</figcaption></figure>
+      <figure role="listitem"><img src="screenshots/flight.jpg" alt="Jet with vapour trails over Sicily, In the air timer, speed 832 km/h, altitude 10,668 m" width="390" height="844" loading="lazy"><figcaption>Watch your flight, speed and altitude live</figcaption></figure>
+    </div>
+    <div class="w-body">
+      <h2>About</h2>
+      <p>Flightroute shows where you are on a map at 35,000 feet, with the phone in flight mode. Before you fly, enter your flight number or the two airports and it saves detailed street maps around both ends and an overview map along the route. In the air it uses your phone's own GPS, so there's no Wi-Fi or data needed.</p>
+      <h2>Features</h2>
+      <ul class="w-list">
+        <li>Flight number lookup and a built-in list of 3,200 airports</li>
+        <li>Offline maps from OpenStreetMap, saved on your phone</li>
+        <li>Flight timer that starts at takeoff and stops on landing</li>
+        <li>Speed, altitude, distance to destination and GPS signal strength</li>
+        <li>Record your track and export it as GPX</li>
+        <li>Try a simulated flight before you go</li>
+      </ul>
+      <h2>Tips for the flight</h2>
+      <p>Sit by a window for the best GPS fix, keep the phone plugged in, and keep Flightroute on screen: iPhones pause GPS for web apps when the screen locks.</p>
+      <p class="w-fine">Map data © OpenStreetMap contributors, © OpenMapTiles, served by OpenFreeMap. Your position and tracks never leave your device.</p>
+    </div>
+  </div>
+</section>
+
+<section class="install-sheet" id="installSheet" hidden aria-labelledby="hInst" role="dialog" aria-modal="true">
+  <div class="is-card">
+    <div class="sheet-head"><h2 id="hInst">Add to Home Screen</h2><button class="x" id="isClose" aria-label="Close">✕</button></div>
+    <p id="isIntro">Apple doesn't let websites install themselves, so it takes three taps in Safari:</p>
+    <ol class="is-steps" id="isSteps">
+      <li><span class="is-n">1</span><span id="isStep1">Tap the <b>Share</b> button <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 3v12M7.5 7.5L12 3l4.5 4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M8 11H6a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-8a1 1 0 0 0-1-1h-2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg> <span id="isWhere">in Safari's toolbar</span>. If you can't see it, tap <b>⋯</b> first.</span></li>
+      <li><span class="is-n">2</span><span>Scroll down and tap <b>Add to Home Screen</b>.</span></li>
+      <li><span class="is-n">3</span><span>Tap <b>Add</b>. Flightroute appears on your home screen; open it from there.</span></li>
+    </ol>
+    <p class="hint" id="isNote">Open it from the home screen from now on: saved maps are kept there, and it opens straight to the map.</p>
+    <div class="row"><button class="primary" id="isDone">Got it</button></div>
+  </div>
 </section>
 
 <div class="toast" id="toast" hidden></div>

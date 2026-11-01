@@ -20,5 +20,29 @@
       "type": "image/png",
       "purpose": "any"
     }
+  ],
+  "id": "./",
+  "screenshots": [
+    {
+      "src": "screenshots/map.jpg",
+      "sizes": "780x1688",
+      "type": "image/jpeg",
+      "form_factor": "narrow",
+      "label": "See where you are, even with no signal"
+    },
+    {
+      "src": "screenshots/plan.jpg",
+      "sizes": "780x1688",
+      "type": "image/jpeg",
+      "form_factor": "narrow",
+      "label": "Plan by flight number or airport"
+    },
+    {
+      "src": "screenshots/flight.jpg",
+      "sizes": "780x1688",
+      "type": "image/jpeg",
+      "form_factor": "narrow",
+      "label": "Watch your flight, speed and altitude live"
+    }
   ]
 }

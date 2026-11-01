@@ -15,7 +15,7 @@ Flightroute is a web app that shows your position on a map and keeps working wit
 - **GPS signal** bars and accuracy in the top bar, with a warning when fixes stop arriving; an Offline pill when there is no connection
 - Records tracks (record, pause, stop), shows speed, distance, time and altitude, and lists saved tracks
 - Exports tracks as GPX (share sheet on iPhone) and imports GPX files
-- Installs to the home screen and opens offline
+- Installs to the home screen and opens offline. Opening the site in a browser shows a store-style welcome page with **Install** (the browser's own install prompt on Android and desktop Chrome; a three-step guide on iPhone, iPad and Mac Safari, which don't allow one-tap install) and **Web version**
 
 ## Using it on iPhone
 
@@ -37,6 +37,7 @@ Limits: iOS stops web apps from reading GPS while the screen is locked or anothe
 | `app.js` | Map, GPS, recording, offline tiles, GPX |
 | `sw.js` | Service worker that keeps the app available offline |
 | `manifest.webmanifest`, `icons/` | Home screen install |
+| `screenshots/` | Welcome page and install screenshots |
 | `airports.json` | Airports with scheduled flights, from [OurAirports](https://ourairports.com/data/) (public domain) |
 | `vendor/` | MapLibre GL JS 4.7.1 (BSD-3-Clause, see `vendor/maplibre-LICENSE.txt`) |
 

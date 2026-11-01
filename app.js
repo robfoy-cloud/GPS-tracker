@@ -365,7 +365,7 @@ function endSimulation(msg){
   groundAlt=null; slowSince=null; last=null; firstFix=true;
   $('simPill').hidden=true; showFlight(); setJetAnimation(false);
   status('search','Finding GPS',0);
-  startGPS(); if(msg) toast(msg);
+  gpsStarted=false; startGPSOnce(); if(msg) toast(msg);
 }
 $('bSim').onclick=simulateFlight;
 $('simPill').onclick=()=>endSimulation('Simulation stopped.');
@@ -931,7 +931,49 @@ if('serviceWorker' in navigator){
   navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(!reloaded && !rec && navigator.serviceWorker.controller){ reloaded=true; location.reload(); } });
 }
 
+/* ---------------- welcome page and install ---------------- */
+const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const ua = navigator.userAgent;
+const isIPad = /iPad/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+const isIOS = isIPad || /iPhone|iPod/.test(ua);
+const isMacSafari = !isIOS && /Macintosh/.test(ua) && /Safari/.test(ua) && !/Chrome|Chromium|Edg|Firefox/.test(ua);
+let installPrompt = null, gpsStarted = false;
+addEventListener('beforeinstallprompt', e => { e.preventDefault(); installPrompt = e; });
+addEventListener('appinstalled', () => { installPrompt = null; $('wInstall').textContent = 'Installed'; $('wInstall').disabled = true; });
+function startGPSOnce(){ if(!gpsStarted && !sim){ gpsStarted = true; startGPS(); } }
+function showWelcome(){
+  $('welcome').hidden = false; $('welcome').scrollTop = 0;
+  if(standalone){ $('wInstall').textContent = 'Installed'; $('wInstall').disabled = true; $('wWeb').textContent = 'Open map'; }
+}
+$('wWeb').onclick = () => { lsSet('fieldline.web', true); $('welcome').hidden = true; startGPSOnce(); };
+$('bAbout').onclick = () => { $('pOffline').hidden = true; showWelcome(); };
+$('wInstall').onclick = async () => {
+  if(installPrompt){                                  // Chrome, Edge, Android: the browser's own install prompt
+    installPrompt.prompt();
+    const { outcome } = await installPrompt.userChoice.catch(() => ({}));
+    installPrompt = null;
+    if(outcome === 'accepted') toast('Installing Flightroute. Open it from your home screen.');
+    return;
+  }
+  const steps = $('isSteps'), intro = $('isIntro');
+  if(isIOS){
+    intro.textContent = "Apple doesn't let websites install themselves, so it takes three taps" + (/CriOS|FxiOS|EdgiOS/.test(ua) ? ':' : ' in Safari:');
+    $('isWhere').textContent = isIPad ? 'at the top right of Safari' : 'at the bottom of the screen';
+    steps.hidden = false;
+  } else if(isMacSafari){
+    intro.innerHTML = 'In Safari on a Mac, choose <b>File → Add to Dock</b>, then <b>Add</b>. Flightroute then opens like an app from the Dock.';
+    steps.hidden = true;
+  } else {
+    intro.innerHTML = "Open your browser's menu and choose <b>Install app</b> or <b>Add to Home screen</b>. If you don't see either, this browser can't install web apps; use the web version instead.";
+    steps.hidden = true;
+  }
+  $('installSheet').hidden = false;
+};
+const closeInstall = () => { $('installSheet').hidden = true; };
+$('isClose').onclick = closeInstall; $('isDone').onclick = closeInstall;
+$('installSheet').addEventListener('click', e => { if(e.target === $('installSheet')) closeInstall(); });
+
 initMap();
-startGPS();
+if(!standalone && !lsGet('fieldline.web', false)) showWelcome(); else startGPSOnce();
 readouts();
 })();

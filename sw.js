@@ -3,13 +3,14 @@
 // so the page and its code can never come from different versions. A new version downloads in full
 // in the background; once it is ready it takes over and the page reloads once.
 // Map tiles and fonts are stored separately by app.js ('fieldline-tiles-v1') and are not touched here.
-const VERSION = 17;
+const VERSION = 18;
 const SHELL = 'fieldline-shell-v' + VERSION;
 const RUNTIME = 'fieldline-runtime-v1';
 const FILES = [
   './', 'app.js', 'app.css', 'manifest.webmanifest', 'airports.json',
   'vendor/maplibre-gl.js', 'vendor/maplibre-gl.css',
-  'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'
+  'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png',
+  'screenshots/map.jpg', 'screenshots/plan.jpg', 'screenshots/flight.jpg'
 ];
 
 // Hosts such as Cloudflare redirect /index.html to /. A response that went through a redirect must not
