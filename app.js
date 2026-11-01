@@ -164,8 +164,9 @@ async function initMap(){
     map.addLayer({id:'trk-line',type:'line',source:'trk',layout:{'line-join':'round','line-cap':'round'},paint:{'line-color':'#C9440E','line-width':4}});
     map.addLayer({id:'acc-fill',type:'fill',source:'acc',paint:{'fill-color':'#1A73E8','fill-opacity':.14}});
     map.addLayer({id:'acc-line',type:'line',source:'acc',paint:{'line-color':'#1A73E8','line-width':1,'line-opacity':.5}});
-    map.addImage('jet', jetImage(), {pixelRatio:2});
-    map.addLayer({id:'me-jet',type:'symbol',source:'me',layout:{'icon-image':'jet','icon-rotate':['get','brg'],
+    map.addImage('arrow', arrowImage(), {pixelRatio:2});
+    map.addImage('jet-anim', animatedJet(), {pixelRatio:2});
+    map.addLayer({id:'me-jet',type:'symbol',source:'me',layout:{'icon-image':['get','icon'],'icon-rotate':['get','brg'],
       'icon-rotation-alignment':'map','icon-allow-overlap':true,'icon-ignore-placement':true}});
     mapReady = true;
     drawPosition(); drawTrack(); drawSaved(); drawJourney();
@@ -175,15 +176,67 @@ async function initMap(){
 }
 
 /* Small top-down jet, nose up (north); rotated to the direction of travel on the map. */
-function jetImage(){
-  const n=72, c=document.createElement('canvas'); c.width=c.height=n; const g=c.getContext('2d');
-  const k=n/64; g.scale(k,k);
-  const P=[[32,2],[35.5,9],[35.5,25],[61,40],[61,45],[35.5,38],[35,51],[44,57.5],[44,61.5],[32,58.5],[20,61.5],[20,57.5],[29,51],[28.5,38],[3,45],[3,40],[28.5,25],[28.5,9]];
-  g.beginPath(); P.forEach(([x,y],i)=>i?g.lineTo(x,y):g.moveTo(x,y)); g.closePath();
-  g.lineJoin='round'; g.lineWidth=4; g.strokeStyle='#FFFFFF'; g.stroke();
-  g.fillStyle='#1A73E8'; g.fill();
+/* Position marker: a navigation arrow on the ground, an animated jet in the air. Both point north
+   in the image and are rotated on the map to the direction of travel. */
+const JET=[[32,2],[35.5,9],[35.5,25],[61,40],[61,45],[35.5,38],[35,51],[44,57.5],[44,61.5],[32,58.5],[20,61.5],[20,57.5],[29,51],[28.5,38],[3,45],[3,40],[28.5,25],[28.5,9]];
+function arrowImage(){
+  const n=64, c=document.createElement('canvas'); c.width=c.height=n; const g=c.getContext('2d');
+  g.shadowColor='rgba(0,0,0,.3)'; g.shadowBlur=4; g.shadowOffsetY=1;
+  g.beginPath(); g.moveTo(32,6); g.lineTo(54,55); g.lineTo(32,44); g.lineTo(10,55); g.closePath();
+  g.lineJoin='round'; g.lineWidth=5; g.strokeStyle='#FFFFFF'; g.stroke();
+  g.shadowColor='transparent'; g.fillStyle='#1A73E8'; g.fill();
   return g.getImageData(0,0,n,n);
 }
+// The jet is drawn centred on a larger canvas so its exhaust and trails fit behind it while it rotates
+// about its own centre. Redrawn at ~14 frames a second only while airborne, to spare the battery.
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+function animatedJet(){
+  const N=192, U=N/128;               // canvas px; 128 drawing units; plane is 64 units wide in the middle
+  let ctx=null, last=0;
+  const img={ width:N, height:N, data:new Uint8Array(N*N*4),
+    onAdd(){ const c=document.createElement('canvas'); c.width=c.height=N; ctx=c.getContext('2d',{willReadFrequently:true}); },
+    render(){
+      const now=performance.now();
+      if(last && now-last<70) return false;
+      last=now; draw(reduceMotion?0:now/1000);
+      img.data.set(ctx.getImageData(0,0,N,N).data);
+      return true;
+    }};
+  function draw(t){
+    const g=ctx; g.setTransform(1,0,0,1,0,0); g.clearRect(0,0,N,N); g.setTransform(U,0,0,U,32*U,32*U); // plane space: 0..64
+    // vapour trails streaming back from the two engines, with moving puffs to show speed
+    for(const ex of [19,45]){
+      const grad=g.createLinearGradient(0,40,0,100); grad.addColorStop(0,'rgba(255,255,255,.95)'); grad.addColorStop(1,'rgba(255,255,255,0)');
+      const edge=g.createLinearGradient(0,40,0,100); edge.addColorStop(0,'rgba(20,50,90,.35)'); edge.addColorStop(1,'rgba(20,50,90,0)');
+      g.beginPath(); g.moveTo(ex-2.5,41); g.lineTo(ex+2.5,41); g.lineTo(ex+6,100); g.lineTo(ex-6,100); g.closePath();
+      g.fillStyle=grad; g.fill(); g.lineWidth=1; g.strokeStyle=edge; g.stroke();
+      for(let k=0;k<5;k++){
+        const y=46+((t*45+k*11+ex)%54), r=2+(y-46)*0.07, a=Math.max(0,.8-(y-46)/70);
+        g.fillStyle=`rgba(255,255,255,${a.toFixed(2)})`; g.strokeStyle=`rgba(20,50,90,${(a*0.35).toFixed(2)})`;
+        g.beginPath(); g.arc(ex+Math.sin(t*3+k)*0.7,y,r,0,7); g.fill(); g.stroke();
+      }
+      // flickering flame at the engine exhaust
+      const f=1+0.35*Math.sin(t*31+ex)+0.2*Math.sin(t*17.3+ex*2);
+      const fg=g.createLinearGradient(0,38,0,38+14*f); fg.addColorStop(0,'rgba(255,250,200,1)'); fg.addColorStop(.4,'rgba(255,160,40,1)'); fg.addColorStop(1,'rgba(240,70,20,0)');
+      g.fillStyle=fg; g.beginPath(); g.moveTo(ex-3.2,38); g.quadraticCurveTo(ex,38+17*f,ex+3.2,38); g.closePath(); g.fill();
+    }
+    // engine pods under the wings
+    g.fillStyle='#0F4FA8'; for(const ex of [19,45]){ g.beginPath(); g.ellipse(ex,33.5,2.4,5,0,0,7); g.fill(); }
+    // the jet
+    g.beginPath(); JET.forEach(([x,y],i)=>i?g.lineTo(x,y):g.moveTo(x,y)); g.closePath();
+    g.lineJoin='round'; g.lineWidth=3.5; g.strokeStyle='#FFFFFF'; g.stroke(); g.fillStyle='#1A73E8'; g.fill();
+    g.fillStyle='rgba(255,255,255,.7)'; g.beginPath(); g.ellipse(32,12,1.6,3.4,0,0,7); g.fill();   // cockpit glint
+  }
+  return img;
+}
+// Keep the jet animating while airborne and the app is on screen
+let animTimer=null;
+function setJetAnimation(on){
+  on = on && !reduceMotion && document.visibilityState==='visible';
+  if(on && !animTimer) animTimer=setInterval(()=>map&&map.triggerRepaint(),70);
+  if(!on && animTimer){ clearInterval(animTimer); animTimer=null; }
+}
+document.addEventListener('visibilitychange',()=>setJetAnimation(flight?.phase==='air'));
 function brg(a,b){const y=Math.sin(rad(b.lon-a.lon))*Math.cos(rad(b.lat)),x=Math.cos(rad(a.lat))*Math.sin(rad(b.lat))-Math.sin(rad(a.lat))*Math.cos(rad(b.lat))*Math.cos(rad(b.lon-a.lon));return (Math.atan2(y,x)*180/Math.PI+360)%360;}
 function accCircle(p){
   const n=48, coords=[], r=Math.max(p.acc||0,1);
@@ -192,7 +245,9 @@ function accCircle(p){
 }
 function drawPosition(){
   if(!mapReady||!last) return;
-  map.getSource('me').setData({type:'Feature',properties:{brg:bearing},geometry:{type:'Point',coordinates:[last.lon,last.lat]}});
+  const air = flight.phase==='air';
+  map.getSource('me').setData({type:'Feature',properties:{brg:bearing, icon: air?'jet-anim':'arrow'},geometry:{type:'Point',coordinates:[last.lon,last.lat]}});
+  setJetAnimation(air);
   map.getSource('acc').setData(last.acc ? accCircle(last) : empty);
 }
 const line = pts => pts.length>1 ? {type:'Feature',geometry:{type:'LineString',coordinates:pts.map(p=>[p.lon,p.lat])}} : empty;
@@ -218,7 +273,7 @@ function onPos(pos){
   const prev = last; last = p;
   lastFixAt = Date.now(); gpsBlocked = false; showGps();
   if($('banner').dataset.kind==='gps') { banner(null); $('banner').dataset.kind=''; }
-  if(Date.now()-lastSave>30000){ lsSet(K.last,{lat:p.lat,lon:p.lon}); lastSave=Date.now(); }
+  if(!sim && Date.now()-lastSave>30000){ lsSet(K.last,{lat:p.lat,lon:p.lon}); lastSave=Date.now(); }
   // Direction of travel: the GPS heading when moving, otherwise the bearing from the last clearly separate fix.
   if(isFinite(c.heading) && c.heading!==null && (c.speed||0)>1) bearing=c.heading;
   else if(headFrom && hav(headFrom,p) > Math.max(8, p.acc)) bearing=brg(headFrom,p);
@@ -267,15 +322,63 @@ function readouts(){
 }
 setInterval(()=>{ if(rec) readouts(); showFlight(); }, 1000);
 
+/* ---------------- flight simulator (for testing on the ground) ---------------- */
+let sim = null;   // {timer, saved}
+function simulateFlight(){
+  if(sim) return;
+  if(rec){ toast('Stop recording first.'); return; }
+  // Route: the planned journey, else 600 km north-west of here
+  const here = last || (map ? {lat:map.getCenter().lat, lon:map.getCenter().lng} : {lat:35.85, lon:14.48});
+  let A = (journey&&journey.from) || J.from || here, B = (journey&&journey.to) || J.to;
+  if(!B){ const d=600/6371, b=rad(315), la=rad(A.lat), lo=rad(A.lon);
+    const la2=Math.asin(Math.sin(la)*Math.cos(d)+Math.cos(la)*Math.sin(d)*Math.cos(b));
+    const lo2=lo+Math.atan2(Math.sin(b)*Math.sin(d)*Math.cos(la),Math.cos(d)-Math.sin(la)*Math.sin(la2));
+    B={lat:la2*180/Math.PI, lon:lo2*180/Math.PI, name:'test destination'}; }
+  const g = A.elev ?? 60, path = gcPoints(A,B,5);
+  // Flight profile: [steps, speed m/s from→to, altitude m from→to]; one step = 5 s of GPS time
+  // [steps, seconds of flight per step, speed m/s from→to, altitude m from→to]: about an hour gate to gate
+  const prof=[[8,15,6,6,g,g],[5,6,20,78,g,g],[25,25,85,230,g+60,11000],[50,50,230,230,11000,11000],[25,30,230,85,11000,g+250],[3,10,75,35,g+40,g],[12,5,10,6,g,g]];
+  const steps=[]; for(const [n,dt,s0,s1,e0,e1] of prof) for(let i=0;i<n;i++){ const f=n>1?i/(n-1):1; steps.push({dt, spd:s0+(s1-s0)*f, ele:e0+(e1-e0)*f}); }
+  // Spread the route over the flight in proportion to speed, so the whole journey plays in about a minute
+  const tot=steps.reduce((a,x)=>a+x.spd,0); let cum=0;
+  for(const st of steps){ cum+=st.spd; st.f=cum/tot; }
+  const at=f=>{ const x=f*(path.length-1), i=Math.min(path.length-2,Math.floor(x)), r=x-i; return {lat:path[i].lat+(path[i+1].lat-path[i].lat)*r, lon:path[i].lon+(path[i+1].lon-path[i].lon)*r, hd:brg(path[i],path[i+1])}; };
+  // Pause real GPS and keep the real flight timer to restore afterwards
+  if(watchId!=null){ navigator.geolocation.clearWatch(watchId); watchId=null; }
+  sim={saved:flight, timer:null};
+  flight={phase:'ground'}; groundAlt=null; slowSince=null; showFlight();
+  $('simPill').hidden=false; $('pOffline').hidden=true;
+  if(map){ map.jumpTo({center:[A.lon,A.lat], zoom:13}); }
+  setFollow(true); firstFix=false;
+  let k=0, gt=Date.now();
+  sim.timer=setInterval(()=>{
+    if(k>=steps.length){ clearInterval(sim.timer); setTimeout(()=>endSimulation('Simulated flight finished.'), 5000); return; }
+    const st=steps[k], p=at(st.f); gt+=st.dt*1000; sim.now=gt;
+    onPos({timestamp:gt, coords:{latitude:p.lat, longitude:p.lon, accuracy:6, altitude:st.ele, speed:st.spd, heading:p.hd}});
+    k++;
+  }, 420);
+}
+function endSimulation(msg){
+  if(!sim) return;
+  clearInterval(sim.timer);
+  flight=sim.saved||{phase:'ground'}; sim=null;
+  groundAlt=null; slowSince=null; last=null; firstFix=true;
+  $('simPill').hidden=true; showFlight(); setJetAnimation(false);
+  status('search','Finding GPS',0);
+  startGPS(); if(msg) toast(msg);
+}
+$('bSim').onclick=simulateFlight;
+$('simPill').onclick=()=>endSimulation('Simulation stopped.');
+
 /* ---------------- flight timer ---------------- */
 // state: {phase:'ground'|'air'|'landed', takeoff, landing}; survives reloads.
 let flight = lsGet('fieldline.flight', {phase:'ground'});
 let groundAlt = null, groundAt = 0, slowSince = null;
 const AIR_ABOVE = 50;        // metres above the ground to count as airborne
-function saveFlight(){ lsSet('fieldline.flight', flight); }
+function saveFlight(){ if(!sim) lsSet('fieldline.flight', flight); }
 function flightCheck(p){
   if(p.ele==null || !isFinite(p.ele)) return;
-  const spd = p.spd ?? 0, gt = p.t || Date.now(), wall = Date.now();   // gt: GPS time for durations; wall: phone clock for the timer
+  const spd = p.spd ?? 0, gt = p.t || Date.now(), wall = sim ? gt : Date.now();   // gt: GPS time for durations; wall: clock for the timer (the simulator's own clock in a simulation)
   // Ground level: the departure airport's elevation when known, otherwise the altitude while moving slowly.
   if(spd < 15 && p.acc <= 50 && flight.phase !== 'air'){
     const ref = (journey && journey.from && journey.from.elev!=null && hav(p,journey.from) < 15000) ? journey.from.elev : null;
@@ -288,15 +391,15 @@ function flightCheck(p){
     if(climbed || spd > 70){ flight = {phase:'air', takeoff: wall}; slowSince = null; saveFlight(); toast('Airborne: flight timer started.');
       if(map && follow && map.getZoom() > 10) map.jumpTo({center:[p.lon,p.lat], zoom:8}); }
   } else {
-    if(spd < 20){ slowSince ??= gt; if(gt - slowSince > 30000){ flight = {phase:'landed', takeoff: flight.takeoff, landing: wall - (gt - slowSince)}; saveFlight(); groundAlt = p.ele; groundAt = gt; toast('Landed. Flight time '+fmtT((flight.landing-flight.takeoff)/1000)+'.'); } }
+    if(spd < 20){ slowSince ??= gt; if(gt - slowSince > 30000){ flight = {phase:'landed', takeoff: flight.takeoff, landing: sim ? slowSince : wall - (gt - slowSince)}; saveFlight(); groundAlt = p.ele; groundAt = gt; toast('Landed. Flight time '+fmtT((flight.landing-flight.takeoff)/1000)+'.'); } }
     else slowSince = null;
   }
   showFlight();
 }
 function showFlight(){
-  const el=$('flight');
-  if(flight.phase==='air'){ el.hidden=false; el.dataset.state='air'; $('flightText').textContent='In the air '+fmtT((Date.now()-flight.takeoff)/1000); }
-  else if(flight.phase==='landed' && Date.now()-flight.landing < 6*3600e3){ el.hidden=false; el.dataset.state='landed'; $('flightText').textContent='Landed · flight '+fmtT((flight.landing-flight.takeoff)/1000); }
+  const el=$('flight'), now = sim ? (sim.now||Date.now()) : Date.now();
+  if(flight.phase==='air'){ el.hidden=false; el.dataset.state='air'; $('flightText').textContent='In the air '+fmtT((now-flight.takeoff)/1000); }
+  else if(flight.phase==='landed' && now-flight.landing < 6*3600e3){ el.hidden=false; el.dataset.state='landed'; $('flightText').textContent='Landed · flight '+fmtT((flight.landing-flight.takeoff)/1000); }
   else el.hidden=true;
 }
 showFlight();

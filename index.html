@@ -23,6 +23,7 @@
   <div class="pill gps" id="status" data-s="search" data-q="0" title="GPS signal"><span class="bars" aria-hidden="true"><i></i><i></i><i></i><i></i></span><span id="statusText">Starting</span></div>
   <div class="pill flight" id="flight" hidden><svg viewBox="0 0 64 64" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M32 2l3.5 7v16L61 40v5L35.5 38 35 51l9 6.5v4L32 58.5 20 61.5v-4l9-6.5-.5-13L3 45v-5l25.5-15V9z"/></svg><span id="flightText"></span></div>
   <div class="pill rec" id="recPill" hidden><span class="dot"></span><span id="recText">Recording</span></div>
+  <button class="pill sim" id="simPill" hidden>Simulated flight · Stop</button>
   <div class="pill net" id="net" hidden>Offline</div>
 </div>
 
@@ -89,6 +90,8 @@
   </div>
   <div class="row"><button class="primary" id="bSaveJourney" disabled>Save journey maps</button></div>
   <p class="hint" id="oResult" hidden></p>
+  <div class="row"><button id="bSim">Simulate a flight</button></div>
+  <p class="hint">Plays a whole flight in about a minute along the journey above (or north-west from where you are), so you can see the timer, the jet and landing detection before you fly. Your real GPS and timer come back afterwards.</p>
 
   <h3>Save the area on screen</h3>
   <p>Frame the area you want, pick a detail level, then save.</p>
@@ -112,7 +115,7 @@
   <h3>Saved maps</h3>
   <ul class="areas" id="areas"></ul>
   <div class="row"><button class="danger" id="bClear">Delete all offline maps</button></div>
-  <p class="ver">Flightroute version 16 · 1 Nov 2026</p>
+  <p class="ver">Flightroute version 17 · 1 Nov 2026</p>
 </section>
 
 <section class="sheet" id="pTracks" hidden aria-labelledby="hTr">

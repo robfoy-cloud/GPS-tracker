@@ -6,7 +6,8 @@ Flightroute is a web app that shows your position on a map and keeps working wit
 
 ## What it does
 
-- Shows your live position as a small jet that turns to face your direction of travel, with an accuracy circle, on an OpenStreetMap-based map
+- Shows your live position on an OpenStreetMap-based map as a navigation arrow on the ground and, once airborne, an animated jet with flickering engines and vapour trails; both turn to face your direction of travel
+- **Simulate a flight** (Offline map panel): plays a whole flight along the planned journey in about a minute, to test the timer, the jet and landing detection before flying
 - **Plan a journey**: enter a flight number (looked up on [adsbdb](https://www.adsbdb.com)) or pick airports from the built-in list of 3,200 airports (works offline) or any place; recent journeys and places are remembered; it saves street maps around both ends and an overview map along the great-circle route, draws the route, and shows the distance still to go
 - **Save the area on screen** at Overview (flights, a continent), Region or Street detail
 - Zooming in past the saved detail shows the coarser saved map instead of a blank screen
