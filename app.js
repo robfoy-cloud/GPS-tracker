@@ -8,7 +8,7 @@ const TILE_CACHE = 'fieldline-tiles-v1';
 const K = { tracks:'fieldline.tracks.v2', last:'fieldline.lastpos', style:'fieldline.style', tj:'fieldline.tilejson', areas:'fieldline.areas' };
 const MAX_TILES = 15000;
 // Saved-map detail levels: highest zoom stored. Vector tiles stop at z14; the map overzooms beyond.
-const DETAIL = { overview:{z:6, label:'Overview'}, region:{z:9, label:'Region'}, street:{z:14, label:'Street'} };
+const DETAIL = { overview:{z:7, label:'Overview'}, region:{z:9, label:'Region'}, street:{z:14, label:'Street'} };
 // Rough average tile size by zoom, for the size estimate only.
 const tileKB = z => z<=5?180 : z<=7?110 : z<=10?60 : 35;
 
@@ -66,7 +66,8 @@ async function loadStyle(){
   s.sources[srcKey] = {type:'vector', tiles:tj.tiles.map(u=>'cached://'+u), minzoom:tj.minzoom, maxzoom:tj.maxzoom,
     attribution:'<a href="https://openfreemap.org" target="_blank">OpenFreeMap</a> <a href="https://www.openmaptiles.org/" target="_blank">© OpenMapTiles</a> Data from <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>'};
   if (s.glyphs) s.glyphs = 'cached://' + s.glyphs;
-  for (const k in s.sources) if (s.sources[k].type === 'raster' && s.sources[k].tiles) s.sources[k].tiles = s.sources[k].tiles.map(u => 'cached://' + u);
+  // Drop the shaded-relief picture layer: plain land with a sharp coastline reads better and saves space.
+  for (const k in s.sources) if (s.sources[k].type === 'raster') { s.layers = s.layers.filter(l => l.source !== k); delete s.sources[k]; }
   return {style:s, tj};
 }
 maplibregl.addProtocol('cached', async (params, ac) => {
@@ -311,7 +312,7 @@ const lat2y=(lat,z)=>{const r=rad(Math.max(-85.05,Math.min(85.05,lat)));return M
 /* Besides the map data, the style draws low zooms from shaded-relief images and needs fonts and icons. */
 function styleExtras(){
   const st=lsGet(K.style,null); if(!st) return {raster:[], assets:[]};
-  const raster=Object.values(st.sources).filter(x=>x.type==='raster'&&x.tiles).map(x=>({tpl:x.tiles[0], maxz:x.maxzoom??6}));
+  const raster=[];   // relief layer is not used (see loadStyle)
   const assets=[];
   if(st.glyphs){
     const fonts=new Set();
@@ -423,7 +424,8 @@ function journeyTiles(a,b){
   const half=hav(a,b)/2000+800;
   addBox(set,tpl,{lat:(a.lat+b.lat)/2,lon:(a.lon+b.lon)/2},half,0,5);
   for(let z=0;z<=2;z++) for(let x=0;x<2**z;x++) for(let y=0;y<2**z;y++) set.set(z+'/'+x+'/'+y,z);   // whole world, very coarse
-  for(const p of gcPoints(a,b,25)){ addBox(set,tpl,p,250,0,6); addBox(set,tpl,p,40,7,8); }
+  // Along the route: overview wide, then sharper coastlines and towns closer to the line
+  for(const p of gcPoints(a,b,20)){ addBox(set,tpl,p,250,0,6); addBox(set,tpl,p,150,7,8); addBox(set,tpl,p,50,9,9); }
   // departure and arrival: region around, streets close in
   for(const p of [a,b]){ addBox(set,tpl,p,35,0,12); addBox(set,tpl,p,10,13,maxz); }
   const urls=[], zs=[];
