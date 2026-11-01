@@ -265,13 +265,32 @@ function startGPS(){
   if(!('geolocation' in navigator)){ status('off','No GPS'); banner('This browser has no location support.'); return; }
   showGps();
   watchId = navigator.geolocation.watchPosition(onPos, onErr, {enableHighAccuracy:true, maximumAge:0, timeout:30000});
+  gpsWatchStarted = Date.now();
 }
+/* iOS can quietly stop sending positions after a signal dropout (common in a cabin) or after the app
+   was in the background. Restart the watch if nothing has arrived for 45 s, and on returning to the app. */
+let gpsWatchStarted = 0;
+function restartGPS(){
+  if(sim || gpsBlocked || !gpsStarted) return;
+  if(watchId!=null){ try{ navigator.geolocation.clearWatch(watchId); }catch(e){} watchId=null; }
+  startGPS();
+}
+setInterval(()=>{
+  if(document.visibilityState!=='visible') return;
+  const quietFor = Date.now() - Math.max(lastFixAt, gpsWatchStarted);
+  if(quietFor > 45000) restartGPS();
+}, 15000);
+document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible') restartGPS(); });
+/* Precise Location off: iOS blurs the position to several km. Say how to fix it. */
+let coarseFixes = 0;
 let lastSave = 0, headFrom = null;
 function onPos(pos){
   const c = pos.coords;
   const p = {lat:c.latitude, lon:c.longitude, acc:c.accuracy, ele:c.altitude, spd:c.speed, t:pos.timestamp};
   const prev = last; last = p;
   lastFixAt = Date.now(); gpsBlocked = false; showGps();
+  coarseFixes = c.accuracy > 1500 ? coarseFixes+1 : 0;
+  if(coarseFixes===3 && !sim){ banner('<b>Your position is only approximate (±'+Math.round(c.accuracy/1000)+' km).</b> Turn on Precise Location: Settings → Privacy &amp; Security → Location Services → Safari Websites (or Flightroute) → Precise Location.'); $('banner').dataset.kind='gps'; }
   if($('banner').dataset.kind==='gps') { banner(null); $('banner').dataset.kind=''; }
   if(!sim && Date.now()-lastSave>30000){ lsSet(K.last,{lat:p.lat,lon:p.lon}); lastSave=Date.now(); }
   // Direction of travel: the GPS heading when moving, otherwise the bearing from the last clearly separate fix.
@@ -282,7 +301,9 @@ function onPos(pos){
 
   if(rec && !paused){
     const lp = rec.pts[rec.pts.length-1];
-    if(p.acc<=50 && (!lp || hav(lp,p) >= Math.max(3, p.acc*0.4))){
+    // In the air a fix through the cabin window is rougher, but ±250 m hardly matters at 800 km/h
+    const maxAcc = flight.phase==='air' ? 250 : 50;
+    if(p.acc<=maxAcc && (!lp || hav(lp,p) >= Math.max(3, Math.min(p.acc*0.4, 40)))){
       rec.pts.push({lat:+p.lat.toFixed(7), lon:+p.lon.toFixed(7), ele:p.ele==null?null:+p.ele.toFixed(1), t:p.t});
       drawTrack();
     }
