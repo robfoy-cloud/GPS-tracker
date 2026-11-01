@@ -3,7 +3,7 @@
 // so the page and its code can never come from different versions. A new version downloads in full
 // in the background; once it is ready it takes over and the page reloads once.
 // Map tiles and fonts are stored separately by app.js ('fieldline-tiles-v1') and are not touched here.
-const VERSION = 13;
+const VERSION = 14;
 const SHELL = 'fieldline-shell-v' + VERSION;
 const RUNTIME = 'fieldline-runtime-v1';
 const FILES = [

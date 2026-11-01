@@ -41,7 +41,7 @@ setInterval(showGps, 2000);
 let cachePromise = null;
 const preview = lsGet('fieldline.preview', false) === true;   // offline preview: draw saved maps only
 function openCache(){ if(!('caches' in window)) return Promise.resolve(null); return cachePromise ||= caches.open(TILE_CACHE).catch(()=>null); }
-const notSaved = url => Object.assign(new Error('Not saved for offline use'), {notSaved:true, url});
+const notSaved = url => Object.assign(new Error('Not saved for offline use: '+url), {notSaved:true, url});
 async function cachedArrayBuffer(url, signal){
   const c = await openCache();
   const hit = c && await c.match(url);
@@ -78,15 +78,27 @@ async function loadStyle(){
     lsSet(K.tj, tj);
   }
   const s = structuredClone(style);
-  s.sources[srcKey] = {type:'vector', tiles:tj.tiles.map(u=>'cached://'+u), minzoom:tj.minzoom, maxzoom:tj.maxzoom,
+  // The map asks for 'cached://tile/z/x/y'; the handler below rebuilds the real address. Passing the full
+  // address inside the custom URL is not safe: Safari rewrites 'cached://https://…', so lookups missed.
+  REAL.tile = tj.tiles[0]; REAL.glyphs = style.glyphs || null;
+  s.sources[srcKey] = {type:'vector', tiles:['cached://tile/{z}/{x}/{y}'], minzoom:tj.minzoom, maxzoom:tj.maxzoom,
     attribution:'<a href="https://openfreemap.org" target="_blank">OpenFreeMap</a> <a href="https://www.openmaptiles.org/" target="_blank">© OpenMapTiles</a> Data from <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>'};
-  if (s.glyphs) s.glyphs = 'cached://' + s.glyphs;
+  if (s.glyphs) s.glyphs = 'cached://font/{fontstack}/{range}';
   // Drop the shaded-relief picture layer: plain land with a sharp coastline reads better and saves space.
   for (const k in s.sources) if (s.sources[k].type === 'raster') { s.layers = s.layers.filter(l => l.source !== k); delete s.sources[k]; }
   return {style:s, tj};
 }
+const REAL = {tile:null, glyphs:null};
+function realURL(u){
+  let m = u.match(/tile\/+(\d+)\/+(\d+)\/+(\d+)\/?$/i);
+  if (m && REAL.tile) return REAL.tile.replace('{z}',m[1]).replace('{x}',m[2]).replace('{y}',m[3]);
+  m = u.match(/font\/+(.+?)\/+(\d+-\d+)\/?$/i);
+  if (m && REAL.glyphs) return REAL.glyphs.replace('{fontstack}', decodeURIComponent(m[1])).replace('{range}', m[2]);
+  return null;
+}
 maplibregl.addProtocol('cached', async (params, ac) => {
-  const url = params.url.slice('cached://'.length);
+  const url = realURL(params.url);
+  if (!url) throw Object.assign(new Error('Unrecognised map request '+params.url), {notSaved:true});
   const data = await cachedArrayBuffer(url, ac.signal);
   return {data};
 });
