@@ -149,6 +149,8 @@ async function initMap(){
       'icon-rotation-alignment':'map','icon-allow-overlap':true,'icon-ignore-placement':true}});
     mapReady = true;
     drawPosition(); drawTrack(); drawSaved(); drawJourney();
+    // A fix that arrived before the map was ready: go there now.
+    if(last && firstFix){ firstFix=false; map.jumpTo({center:[last.lon,last.lat], zoom:Math.max(map.getZoom(),(last.spd||0)>40?7:16)}); }
   });
 }
 
@@ -220,7 +222,7 @@ function onPos(pos){
 function onErr(err){
   if(err.code===1){
     gpsBlocked = true; status('off','Location blocked',0);
-    banner('<b>Location access is turned off for this site.</b> On iPhone: Settings → Privacy &amp; Security → Location Services → Safari Websites → While Using the App, then reload. If you added Fieldline to your home screen, allow it there too.');
+    banner('<b>Location access is turned off for this site.</b> On iPhone: Settings → Privacy &amp; Security → Location Services → Safari Websites → While Using the App, then reload. If you added Flightroute to your home screen, allow it there too.');
     $('banner').dataset.kind='gps';
   } else {
     showGps();
@@ -344,7 +346,7 @@ $('bHide').onclick=()=>{shown=null;drawSaved();renderTracks();};
 function toGPX(t){
   const esc=s=>s.replace(/[<&>"]/g,c=>({'<':'&lt;','&':'&amp;','>':'&gt;','"':'&quot;'}[c]));
   const pts=t.pts.map(p=>`      <trkpt lat="${p.lat}" lon="${p.lon}">${p.ele!=null?`<ele>${p.ele}</ele>`:''}${p.t?`<time>${new Date(p.t).toISOString()}</time>`:''}</trkpt>`).join('\n');
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="Fieldline GPS" xmlns="http://www.topografix.com/GPX/1/1">\n  <trk><name>${esc(t.name)}</name>\n    <trkseg>\n${pts}\n    </trkseg>\n  </trk>\n</gpx>\n`;
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="Flightroute" xmlns="http://www.topografix.com/GPX/1/1">\n  <trk><name>${esc(t.name)}</name>\n    <trkseg>\n${pts}\n    </trkseg>\n  </trk>\n</gpx>\n`;
 }
 async function exportGPX(t){
   const name=t.name.replace(/[^\w\- ]+/g,'').trim().replace(/\s+/g,'-')+'.gpx';
@@ -700,7 +702,11 @@ addEventListener('online',net); addEventListener('offline',net); net();
 new ResizeObserver(()=>document.documentElement.style.setProperty('--dock-h',$('dock').offsetHeight+'px')).observe($('dock'));
 
 if('serviceWorker' in navigator){
-  navigator.serviceWorker.register('sw.js').catch(()=>{});
+  navigator.serviceWorker.register('sw.js',{updateViaCache:'none'}).then(reg=>{
+    // Check for a new version on start and whenever the app comes back to the front.
+    reg.update().catch(()=>{});
+    document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible') reg.update().catch(()=>{}); });
+  }).catch(()=>{});
   // A new version took over: reload once to show it, unless a track is being recorded.
   let reloaded=false;
   navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(!reloaded && !rec && navigator.serviceWorker.controller){ reloaded=true; location.reload(); } });

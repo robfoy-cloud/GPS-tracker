@@ -1,15 +1,24 @@
 {
-  "name": "Fieldline GPS",
-  "short_name": "Fieldline",
-  "description": "GPS position and track logger with offline maps.",
+  "name": "Flightroute",
+  "short_name": "Flightroute",
+  "description": "Follow your flight on a map that works offline.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#16201A",
-  "theme_color": "#16201A",
+  "background_color": "#1F6FA8",
+  "theme_color": "#1F6FA8",
   "icons": [
-    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
   ]
 }

@@ -1,8 +1,8 @@
-# GPS-tracker
+# Flightroute
 
-Off line GPS for iPhone.
+Offline GPS and flight map for iPhone. (Repository: GPS-tracker.)
 
-Fieldline GPS is a web app that shows your position on a map and keeps working with no signal. It is plain HTML, CSS and JavaScript with no build step.
+Flightroute is a web app that shows your position on a map and keeps working with no signal. It is plain HTML, CSS and JavaScript with no build step.
 
 ## What it does
 
@@ -19,13 +19,13 @@ Fieldline GPS is a web app that shows your position on a map and keeps working w
 ## Using it on iPhone
 
 1. Open the site in Safari while you have a connection and allow location access.
-2. Tap **Share → Add to Home Screen**, and open Fieldline from the home screen icon from now on. Home-screen apps keep their stored maps; Safari tabs can have site data cleared after a few weeks of not being used.
+2. Tap **Share → Add to Home Screen**, and open Flightroute from the home screen icon from now on. Home-screen apps keep their stored maps; Safari tabs can have site data cleared after a few weeks of not being used.
 3. Before a flight, open **Offline map → Plan a journey**, enter the departure and arrival cities or airports, and tap **Save journey maps** (about 40 MB for London to Malta). To save somewhere else, frame it on screen and use **Save the area on screen**.
-4. With no signal, open Fieldline from the home screen: the saved area and your position still show.
+4. With no signal, open Flightroute from the home screen: the saved area and your position still show.
 
 On a plane: GPS works in flight mode. Sit by a window for the best fix, and keep the phone plugged in; GPS with the screen on uses a lot of battery.
 
-Limits: iOS stops web apps from reading GPS while the screen is locked or another app is in front, so keep Fieldline open while recording. The app asks to keep the screen awake while recording.
+Limits: iOS stops web apps from reading GPS while the screen is locked or another app is in front, so keep Flightroute open while recording. The app asks to keep the screen awake while recording.
 
 ## Files
 
