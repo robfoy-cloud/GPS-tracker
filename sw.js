@@ -1,9 +1,9 @@
 // Fieldline service worker: keeps the app itself and map sprites available offline.
 // Map tiles and fonts are cached by app.js in 'fieldline-tiles-v1'.
-const SHELL = 'fieldline-shell-v7';
+const SHELL = 'fieldline-shell-v8';
 const RUNTIME = 'fieldline-runtime-v1';
 const FILES = [
-  './', 'index.html', 'app.js', 'app.css', 'manifest.webmanifest',
+  './', 'index.html', 'app.js', 'app.css', 'manifest.webmanifest', 'airports.json',
   'vendor/maplibre-gl.js', 'vendor/maplibre-gl.css',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'
 ];

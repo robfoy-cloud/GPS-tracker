@@ -20,7 +20,9 @@
 
 <div class="topbar">
   <div class="brand">Field<span>line</span></div>
-  <div class="pill" id="status" data-s="search"><span class="dot"></span><span id="statusText">Starting</span></div>
+  <div class="pill gps" id="status" data-s="search" data-q="0" title="GPS signal"><span class="bars" aria-hidden="true"><i></i><i></i><i></i><i></i></span><span id="statusText">Starting</span></div>
+  <div class="pill flight" id="flight" hidden><svg viewBox="0 0 64 64" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M32 2l3.5 7v16L61 40v5L35.5 38 35 51l9 6.5v4L32 58.5 20 61.5v-4l9-6.5-.5-13L3 45v-5l25.5-15V9z"/></svg><span id="flightText"></span></div>
+  <div class="pill rec" id="recPill" hidden><span class="dot"></span><span id="recText">Recording</span></div>
   <div class="pill net" id="net" hidden>Offline</div>
 </div>
 
@@ -34,7 +36,7 @@
     <div class="ro"><div class="lbl">Speed</div><div class="val" id="rSpd">–<small>km/h</small></div></div>
     <div class="ro"><div class="lbl">Distance</div><div class="val" id="rDist">0.00<small>km</small></div></div>
     <div class="ro"><div class="lbl">Time</div><div class="val" id="rTime">0:00:00</div></div>
-    <div class="ro"><div class="lbl">Accuracy</div><div class="val" id="rAcc">–<small>m</small></div></div>
+    <div class="ro"><div class="lbl">Altitude</div><div class="val" id="rAlt">–<small>m</small></div></div>
   </div>
   <div class="coord" id="rPos">Waiting for a position fix</div>
   <div class="row">
@@ -60,14 +62,24 @@
 
   <h3>Plan a journey</h3>
   <p>Saves street maps around where you leave and arrive, and an overview map along the flight path.</p>
+  <div class="recent" id="jRecent" hidden>
+    <div class="lbl">Recent journeys</div>
+    <div class="chips" id="jRecentList"></div>
+  </div>
+  <div class="place">
+    <label for="jFlight">Flight number</label>
+    <div class="row"><input id="jFlight" type="search" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="e.g. KM114 or FR 1234"><button id="bFlight">Find route</button></div>
+    <p class="hint" id="jFlightMsg" hidden></p>
+  </div>
+  <div class="or"><span>or enter airports or places</span></div>
   <div class="place">
     <label for="jFrom">From</label>
-    <div class="row"><input id="jFrom" type="search" autocomplete="off" placeholder="City or airport"><button id="bFromHere">My position</button></div>
+    <div class="row"><input id="jFrom" type="search" autocomplete="off" placeholder="Airport code, airport or city"><button id="bFromHere">My position</button></div>
     <ul class="results" id="rFrom" hidden></ul>
   </div>
   <div class="place">
     <label for="jTo">To</label>
-    <div class="row"><input id="jTo" type="search" autocomplete="off" placeholder="City or airport"></div>
+    <div class="row"><input id="jTo" type="search" autocomplete="off" placeholder="Airport code, airport or city"></div>
     <ul class="results" id="rTo" hidden></ul>
   </div>
   <div class="est" id="jEst" hidden>
@@ -94,7 +106,7 @@
   <h3>Saved maps</h3>
   <ul class="areas" id="areas"></ul>
   <div class="row"><button class="danger" id="bClear">Delete all offline maps</button></div>
-  <p class="ver">Fieldline version 7 · 1 Nov 2026</p>
+  <p class="ver">Fieldline version 8 · 1 Nov 2026</p>
 </section>
 
 <section class="sheet" id="pTracks" hidden aria-labelledby="hTr">

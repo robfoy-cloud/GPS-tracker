@@ -7,10 +7,12 @@ Fieldline GPS is a web app that shows your position on a map and keeps working w
 ## What it does
 
 - Shows your live position as a small jet that turns to face your direction of travel, with an accuracy circle, on an OpenStreetMap-based map
-- **Plan a journey**: enter where you leave from and arrive at; it saves street maps around both ends and an overview map along the great-circle route, draws the route, and shows the distance still to go
+- **Plan a journey**: enter a flight number (looked up on [adsbdb](https://www.adsbdb.com)) or pick airports from the built-in list of 3,200 airports (works offline) or any place; recent journeys and places are remembered; it saves street maps around both ends and an overview map along the great-circle route, draws the route, and shows the distance still to go
 - **Save the area on screen** at Overview (flights, a continent), Region or Street detail
 - Zooming in past the saved detail shows the coarser saved map instead of a blank screen
-- Records tracks (record, pause, stop), shows speed, distance, time and accuracy, and lists saved tracks
+- **Flight timer**: starts automatically once you are 50 m above the ground and moving fast, and stops 30 seconds after you slow down on landing
+- **GPS signal** bars and accuracy in the top bar, with a warning when fixes stop arriving; an Offline pill when there is no connection
+- Records tracks (record, pause, stop), shows speed, distance, time and altitude, and lists saved tracks
 - Exports tracks as GPX (share sheet on iPhone) and imports GPX files
 - Installs to the home screen and opens offline
 
@@ -34,6 +36,7 @@ Limits: iOS stops web apps from reading GPS while the screen is locked or anothe
 | `app.js` | Map, GPS, recording, offline tiles, GPX |
 | `sw.js` | Service worker that keeps the app available offline |
 | `manifest.webmanifest`, `icons/` | Home screen install |
+| `airports.json` | Airports with scheduled flights, from [OurAirports](https://ourairports.com/data/) (public domain) |
 | `vendor/` | MapLibre GL JS 4.7.1 (BSD-3-Clause, see `vendor/maplibre-LICENSE.txt`) |
 
 ## Map data

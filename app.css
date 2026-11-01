@@ -66,7 +66,7 @@ button.danger{color:var(--bad)}
   padding:6px max(16px,env(safe-area-inset-right,0px)) calc(18px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));
   display:flex;flex-direction:column;gap:12px}
 .sheet>*{max-width:720px;width:100%;margin-left:auto;margin-right:auto}
-.sheet-head{display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:var(--panel);padding-top:8px}
+.sheet-head{display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;z-index:3;background:var(--panel);padding-block:8px 6px}
 .sheet h2{font-family:var(--display);font-size:24px;text-transform:uppercase;letter-spacing:.04em;margin:0}
 .sheet h3{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:6px auto 0}
 .sheet p{margin:0;line-height:1.5;color:var(--muted)}
@@ -91,7 +91,7 @@ td.a button{padding:7px 9px;font-size:12px;margin-left:4px}
 tr.sel td{background:color-mix(in srgb,var(--accent) 10%,transparent)}
 .empty{font-size:14px}
 
-.toast{position:fixed;left:50%;transform:translateX(-50%);top:calc(60px + env(safe-area-inset-top,0px));z-index:20;background:var(--fg);color:var(--bg);padding:10px 14px;border-radius:6px;font-size:14px;max-width:calc(100% - 32px)}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(var(--dock-h) + 76px);z-index:20;background:var(--fg);color:var(--bg);padding:10px 14px;border-radius:6px;font-size:14px;max-width:calc(100% - 32px)}
 
 @media (max-width:420px){.dock .val{font-size:22px}.readouts{gap:4px}.dock{gap:8px}}
 
@@ -132,3 +132,31 @@ tr.sel td{background:color-mix(in srgb,var(--accent) 10%,transparent)}
 .switch input:focus-visible+.track{outline:2px solid var(--accent);outline-offset:2px}
 .switch span:last-child{display:flex;flex-direction:column;gap:2px;font-size:13px;color:var(--muted);line-height:1.4}
 .switch b{font-size:14px;color:var(--fg)}
+
+/* GPS signal bars */
+.bars{display:inline-flex;align-items:flex-end;gap:2px;height:12px}
+.bars i{display:block;width:3px;border-radius:1px;background:var(--line)}
+.bars i:nth-child(1){height:4px}.bars i:nth-child(2){height:6px}.bars i:nth-child(3){height:9px}.bars i:nth-child(4){height:12px}
+.gps[data-q="1"] .bars i:nth-child(-n+1){background:var(--bad)}
+.gps[data-q="2"] .bars i:nth-child(-n+2){background:var(--warn)}
+.gps[data-q="3"] .bars i:nth-child(-n+3){background:var(--ok)}
+.gps[data-q="4"] .bars i:nth-child(-n+4){background:var(--ok)}
+.gps[data-s="off"]{color:var(--bad)}
+.pill.flight{color:var(--fg);font-weight:500}
+.pill.flight svg{color:#1A73E8}
+.pill.flight[data-state="landed"] svg{color:var(--muted)}
+.pill.rec{color:var(--accent);font-weight:600}
+.pill.rec .dot{background:var(--accent)}
+@media (prefers-reduced-motion:no-preference){.pill.rec .dot{animation:pulse 1.2s ease-in-out infinite}}
+@media (max-width:440px){.brand{display:none}}
+
+/* planner extras */
+.hint{font-size:13px!important}
+.hint.err{color:var(--bad)!important}
+.or{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+.or::before,.or::after{content:"";flex:1;height:1px;background:var(--line)}
+.recent{display:flex;flex-direction:column;gap:6px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chips button{padding:8px 11px;font-size:13px;font-weight:500;border-radius:999px}
+.results .tagline{display:block;padding:8px 12px 2px;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600}
+.code{font-family:var(--mono);font-size:12px;color:var(--accent);margin-right:6px}
