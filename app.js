@@ -125,6 +125,7 @@ async function initMap(){
   // (otherwise it waits for the next pan or zoom and leaves the square blank).
   let refill = null;
   map.on('error', e => {
+    (window.__mapErrors ||= []).push((e.error?.message||String(e.error)).slice(0,160)+(e.tile?' @'+e.tile.tileID?.canonical?.z+'/'+e.tile.tileID?.canonical?.x+'/'+e.tile.tileID?.canonical?.y:'')); if(window.__mapErrors.length>50) window.__mapErrors.shift();
     if (!e.tile) { console.warn(e.error); return; }
     clearTimeout(refill);
     refill = setTimeout(() => {
@@ -506,6 +507,40 @@ $('bCheck').onclick=async()=>{
   const note=document.createElement('p'); note.className='hint';
   note.textContent='Screen is at zoom '+zNow.toFixed(1)+' (highlighted). Map data version '+(tpl.match(/planet\/([^/]+)\//)?.[1]||'?')+'.';
   out.append(note,t);
+};
+
+/* ---------------- diagnostics to paste into a support chat ---------------- */
+$('bDiag').onclick=async()=>{
+  const out=$('diagOut'); out.hidden=false; out.value='Collecting…';
+  const lines=[], tj=lsGet(K.tj,null);
+  lines.push('Flightroute diagnostics '+new Date().toISOString());
+  lines.push('App: '+(document.querySelector('.ver')?.textContent||'?')+' | preview '+preview+' | online '+navigator.onLine);
+  lines.push('Browser: '+navigator.userAgent);
+  lines.push('Map data: '+(tj?tj.tiles[0]:'none')+' maxzoom '+(tj?.maxzoom??'?'));
+  try{ const e=await navigator.storage.estimate(); lines.push('Storage used '+fmtMB(e.usage||0)+' of '+fmtMB(e.quota||0)+' | persisted '+(await navigator.storage.persisted?.())); }catch(e){ lines.push('Storage: n/a'); }
+  try{
+    const names=await caches.keys(); lines.push('Caches: '+names.join(', '));
+    const c=await openCache(); const keys=c?await c.keys():[];
+    const byZ={}, other={}; let redirected=0, sample=null;
+    for(const r of keys){
+      const m=r.url.match(/\/(\d+)\/(\d+)\/(\d+)\.pbf/);
+      if(m){ byZ[m[1]]=(byZ[m[1]]||0)+1; if(!sample) sample=r.url; }
+      else { const k=r.url.includes('/fonts/')?'fonts':r.url.includes('/sprites/')?'icons':'other'; other[k]=(other[k]||0)+1; }
+    }
+    lines.push('Saved map pieces: '+keys.length+' | by zoom '+Object.keys(byZ).sort((a,b)=>a-b).map(z=>'z'+z+':'+byZ[z]).join(' ')+' | '+JSON.stringify(other));
+    if(sample){ lines.push('Example saved: '+sample); const r=await c.match(sample); if(r){ const b=await r.arrayBuffer(); lines.push('Example size '+b.byteLength+' bytes, type '+r.headers.get('content-type')+', redirected '+r.redirected); } else lines.push('Example NOT readable back'); }
+    if(map){
+      const z=Math.floor(map.getZoom()), ctr=map.getCenter(), u=tj?xyz(tj.tiles[0],z,lon2x(ctr.lng,z),lat2y(ctr.lat,z)):'';
+      lines.push('Screen zoom '+map.getZoom().toFixed(2)+' centre '+ctr.lat.toFixed(3)+','+ctr.lng.toFixed(3)+' | centre piece saved: '+(u&&c?!!(await c.match(u)):'?')+' '+u);
+      try{ const sc=map.style.sourceCaches; for(const k in sc){ const ids=sc[k].getIds(); if(!ids.length) continue; const st={}; ids.forEach(i=>{const t=sc[k].getTileByID(i); st[t.state]=(st[t.state]||0)+1;}); lines.push('Map source '+k+': '+JSON.stringify(st)); } }catch(e){}
+    }
+  }catch(e){ lines.push('Cache error: '+e.name+' '+e.message); }
+  for(const a of lsGet(K.areas,[])) lines.push('Saved: '+(a.journey?'journey '+a.name:'area '+(a.detail||''))+' | '+(a.total?a.saved+'/'+a.total:a.tiles+' planned')+' | '+new Date(a.date).toISOString());
+  lines.push('Last save result: '+($('oResult').textContent||'none this session'));
+  lines.push('Recent map errors: '+(window.__mapErrors||[]).slice(-5).join(' || '));
+  out.value=lines.join('\n');
+  try{ await navigator.clipboard.writeText(out.value); toast('Diagnostics copied. Paste them into the chat.'); }
+  catch(e){ out.focus(); out.select(); toast('Select all the text in the box and copy it.'); }
 };
 
 /* ---------------- journeys ---------------- */
