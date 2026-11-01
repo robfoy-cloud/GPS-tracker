@@ -143,6 +143,7 @@ async function initMap(){
   // (otherwise it waits for the next pan or zoom and leaves the square blank).
   let refill = null;
   map.on('error', e => {
+    { const msg=String(e.error?.message||e.error), fm=msg.match(/fonts\/[^/]+\/(\d+-\d+)/), k=fm?'font range '+fm[1]:/Not saved/.test(msg)?'map piece not saved':msg.slice(0,60); (window.__mapErrTally ||= {})[k]=(window.__mapErrTally[k]||0)+1; }
     (window.__mapErrors ||= []).push((e.error?.message||String(e.error)).slice(0,160)+(e.tile?' @'+e.tile.tileID?.canonical?.z+'/'+e.tile.tileID?.canonical?.x+'/'+e.tile.tileID?.canonical?.y:'')); if(window.__mapErrors.length>50) window.__mapErrors.shift();
     if (!e.tile) { console.warn(e.error); return; }
     clearTimeout(refill);
@@ -400,8 +401,9 @@ function styleExtras(){
   if(st.glyphs){
     const fonts=new Set();
     for(const l of st.layers){ const f=l.layout?.['text-font']; if(Array.isArray(f)&&f.every(x=>typeof x==='string')) fonts.add(f.join(',')); }
-    // Latin, Latin Extended, Greek, Cyrillic, Hebrew and Arabic (place names are also shown in local script)
-    for(const f of fonts) for(const r of [0,1,2,3,4,5,6]) assets.push(st.glyphs.replace('{fontstack}',f).replace('{range}',`${256*r}-${256*r+255}`));
+    // Latin, Latin Extended, Greek, Cyrillic, Hebrew, Arabic (names also show in local script), and
+    // General Punctuation (8192-8447: curly apostrophes and dashes, common in French and Italian names)
+    for(const f of fonts) for(const r of [0,1,2,3,4,5,6,32]) assets.push(st.glyphs.replace('{fontstack}',f).replace('{range}',`${256*r}-${256*r+255}`));
   }
   if(typeof st.sprite==='string') for(const sfx of ['.json','.png','@2x.json','@2x.png']) assets.push(st.sprite+sfx);
   return {raster, assets};
@@ -555,6 +557,7 @@ $('bDiag').onclick=async()=>{
   }catch(e){ lines.push('Cache error: '+e.name+' '+e.message); }
   for(const a of lsGet(K.areas,[])) lines.push('Saved: '+(a.journey?'journey '+a.name:'area '+(a.detail||''))+' | '+(a.total?a.saved+'/'+a.total:a.tiles+' planned')+' | '+new Date(a.date).toISOString());
   lines.push('Last save result: '+($('oResult').textContent||'none this session'));
+  lines.push('All map errors by kind: '+JSON.stringify(window.__mapErrTally||{}));
   lines.push('Recent map errors: '+(window.__mapErrors||[]).slice(-5).join(' || '));
   out.value=lines.join('\n');
   try{ await navigator.clipboard.writeText(out.value); toast('Diagnostics copied. Paste them into the chat.'); }
