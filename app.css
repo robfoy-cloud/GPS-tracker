@@ -160,3 +160,4 @@ tr.sel td{background:color-mix(in srgb,var(--accent) 10%,transparent)}
 .chips button{padding:8px 11px;font-size:13px;font-weight:500;border-radius:999px}
 .results .tagline{display:block;padding:8px 12px 2px;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600}
 .code{font-family:var(--mono);font-size:12px;color:var(--accent);margin-right:6px}
+.areas li.incomplete{border-color:var(--warn)}

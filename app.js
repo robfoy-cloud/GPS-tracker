@@ -415,32 +415,59 @@ function estimate(){
 }
 let saving=null;
 /* Downloads tile URLs into the offline cache. Resolves {cancelled, failed}, or null if it could not start. */
+/* Downloads map pieces into the offline store. Each piece is tried up to 3 times (the map server can
+   turn requests away when many arrive at once). Afterwards the store is checked, so the result says how
+   many pieces are really saved. Resolves {cancelled, saved, total, failed, reasons} or null. */
 async function downloadTiles(urls, label){
   if(saving) return null;
   if(!navigator.onLine){ toast('Connect to the internet to save maps.'); return null; }
   const c=await openCache(); if(!c){ toast('This browser cannot store map tiles.'); return null; }
   try{ await navigator.storage?.persist?.(); }catch(e){}
   saving={cancel:false}; const job=saving; lockScreen();
-  $('bSaveArea').disabled=true; $('bSaveJourney').disabled=true;
+  $('bSaveArea').disabled=true; $('bSaveJourney').disabled=true; $('oResult').hidden=true;
   $('oProg').hidden=false; $('oProgT').textContent=label;
-  let done=0, failed=0, i=0;
+  const reasons={}; let done=0, i=0, pause=0;
+  const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+  async function getOne(u){
+    for(let attempt=0; attempt<3 && !job.cancel; attempt++){
+      if(pause>Date.now()) await sleep(pause-Date.now());
+      try{
+        const r=await fetch(u,{mode:'cors'});
+        if(r.ok){ await c.put(u, r.redirected ? new Response(await r.blob(),{headers:r.headers}) : r); return true; }
+        if(r.status===404||r.status===204) return true;                       // genuinely empty piece
+        reasons['server '+r.status]=(reasons['server '+r.status]||0)+1;
+        if(r.status===429||r.status>=500){ const ra=+r.headers.get('retry-after')||2; pause=Date.now()+ra*1000; }
+      }catch(e){
+        const why=e.name==='QuotaExceededError'?'phone storage full':'connection';
+        reasons[why]=(reasons[why]||0)+1;
+        if(e.name==='QuotaExceededError') { job.cancel='full'; return false; }
+      }
+      await sleep(600*(attempt+1)**2);
+    }
+    return false;
+  }
   const worker=async()=>{
     while(i<urls.length && !job.cancel){
       const u=urls[i++];
-      try{
-        if(!(await c.match(u))){ const r=await fetch(u,{mode:'cors'}); if(r.ok) await c.put(u,r); else if(r.status!==404 && r.status!==204) failed++; }
-      }catch(e){ failed++; }
+      try{ if(!(await c.match(u))) await getOne(u); }catch(e){ reasons['storage']=(reasons['storage']||0)+1; }
       done++; $('oBar').style.width=(done/urls.length*100).toFixed(1)+'%';
       $('oProgT').textContent=label+' · '+Math.floor(done/urls.length*100)+'%';
     }
   };
-  await Promise.all(Array.from({length:6},worker));
+  await Promise.all(Array.from({length:4},worker));
+  // Check what really got stored
+  $('oProgT').textContent='Checking saved maps…';
+  let saved=0; for(const u of urls){ try{ if(await c.match(u)) saved++; }catch(e){} }
   saving=null; if(!rec){ try{ wake?.release(); }catch(e){} wake=null; }
   $('oProg').hidden=true; $('oBar').style.width='0';
-  if(job.cancel) toast('Stopped. Maps already saved are kept.');
-  else if(failed) toast(`Saved, but ${failed} tiles failed. Save again on a better connection to fill the gaps.`);
+  const failed=urls.length-saved, why=Object.entries(reasons).map(([k,v])=>k+' ×'+v).join(', ');
+  const res=$('oResult'); res.hidden=false; res.classList.toggle('err', failed>0);
+  if(job.cancel==='full') res.textContent=`Stopped: the phone's storage for this site is full. ${saved.toLocaleString()} of ${urls.length.toLocaleString()} map pieces saved.`;
+  else if(job.cancel) res.textContent=`Stopped. ${saved.toLocaleString()} of ${urls.length.toLocaleString()} map pieces saved; tap Save again to finish.`;
+  else if(failed) res.textContent=`${saved.toLocaleString()} of ${urls.length.toLocaleString()} map pieces saved. ${failed.toLocaleString()} could not be downloaded (${why||'unknown'}). Tap Save again to fill the gaps; pieces already saved are skipped.`;
+  else res.textContent=`All ${urls.length.toLocaleString()} map pieces saved.`;
   estimate(); planJourney();
-  return {cancelled:job.cancel, failed};
+  return {cancelled:!!job.cancel, saved, total:urls.length, failed, reasons:why};
 }
 $('bSaveArea').onclick=async()=>{
   if(!map) return;
@@ -448,9 +475,9 @@ $('bSaveArea').onclick=async()=>{
   const ex=styleExtras(), urls=list.map(t=>t.u);
   for(const t of list) if(t.x!=null) for(const r of ex.raster) if(t.z<=r.maxz) urls.push(xyz(r.tpl,t.z,t.x,t.y));
   const res=await downloadTiles(urls.concat(ex.assets), 'Saving area');
-  if(!res||res.cancelled) return;
+  if(!res||(res.cancelled&&!res.saved)) return;
   const areas=lsGet(K.areas,[]), c0=b.getCenter();
-  areas.unshift({name:dm(c0.lat,'N','S')+' '+dm(c0.lng,'E','W'), detail:detail(), date:Date.now(), tiles:list.length, b:[b.getWest(),b.getSouth(),b.getEast(),b.getNorth()]});
+  areas.unshift({name:dm(c0.lat,'N','S')+' '+dm(c0.lng,'E','W'), detail:detail(), date:Date.now(), tiles:list.length, saved:res.saved, total:res.total, b:[b.getWest(),b.getSouth(),b.getEast(),b.getNorth()]});
   lsSet(K.areas,areas); renderAreas();
   if(!res.failed) toast('Area saved for offline use.');
 };
@@ -663,10 +690,10 @@ $('bSaveJourney').onclick=async()=>{
   if(!J.from||!J.to) return;
   const plan=journeyTiles(J.from,J.to); if(!plan) return;
   const res=await downloadTiles(plan.urls,'Saving '+J.from.name+' → '+J.to.name);
-  if(!res||res.cancelled) return;
-  const areas=lsGet(K.areas,[]);
+  if(!res||(res.cancelled&&!res.saved)) return;
+  const areas=lsGet(K.areas,[]).filter(a=>!(a.journey&&samePlace(a.from,J.from)&&samePlace(a.to,J.to)));
   const lats=[J.from.lat,J.to.lat], lons=[J.from.lon,J.to.lon];
-  areas.unshift({journey:true, name:J.from.name+' → '+J.to.name, from:J.from, to:J.to, date:Date.now(), tiles:plan.tiles,
+  areas.unshift({journey:true, name:J.from.name+' → '+J.to.name, from:J.from, to:J.to, date:Date.now(), tiles:plan.tiles, saved:res.saved, total:res.total,
     b:[Math.min(...lons),Math.min(...lats),Math.max(...lons),Math.max(...lats)]});
   lsSet(K.areas,areas);
   showJourney({from:J.from,to:J.to});
@@ -696,12 +723,19 @@ function renderAreas(){
   if(!areas.length){ const li=document.createElement('li'); li.className='none'; li.textContent='None yet. Plan a journey or save the area on screen.'; ul.appendChild(li); return; }
   for(const a of areas){
     const li=document.createElement('li');
-    const t=document.createElement('div'); t.textContent=(a.journey?a.name:(DETAIL[a.detail]?.label||'Street'))+' · '+a.tiles.toLocaleString()+' tiles';
+    const t=document.createElement('div'); t.textContent=(a.journey?a.name:(DETAIL[a.detail]?.label||'Street'))+(a.total? (a.saved<a.total?' · ⚠ '+a.saved.toLocaleString()+' of '+a.total.toLocaleString()+' saved':' · complete') : ' · '+a.tiles.toLocaleString()+' tiles');
+    if(a.total&&a.saved<a.total) li.classList.add('incomplete');
     const s=document.createElement('span'); s.textContent=(a.journey?'Journey':a.name)+' · '+new Date(a.date).toLocaleDateString(undefined,{day:'numeric',month:'short',year:'numeric'}); t.appendChild(document.createElement('br')); t.appendChild(s);
     const go=document.createElement('button'); go.textContent='Go to';
     go.textContent=a.journey?'Show route':'Go to';
     go.onclick=()=>{ if(a.journey) showJourney({from:a.from,to:a.to}); setFollow(false); $('pOffline').hidden=true; map?.fitBounds([[a.b[0],a.b[1]],[a.b[2],a.b[3]]],{padding:{top:90,bottom:(parseInt(getComputedStyle(document.documentElement).getPropertyValue('--dock-h'))||200)+40,left:40,right:40},maxZoom:14}); };
-    li.append(t,go); ul.appendChild(li);
+    li.append(t,go);
+    if(a.journey && a.total && a.saved<a.total){
+      const fin=document.createElement('button'); fin.textContent='Finish saving';
+      fin.onclick=()=>{ setPlace('from',a.from,true); setPlace('to',a.to,true); $('bSaveJourney').click(); };
+      li.appendChild(fin);
+    }
+    ul.appendChild(li);
   }
 }
 let clearArm=false;
