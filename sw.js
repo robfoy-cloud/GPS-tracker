@@ -3,14 +3,21 @@
 // so the page and its code can never come from different versions. A new version downloads in full
 // in the background; once it is ready it takes over and the page reloads once.
 // Map tiles and fonts are stored separately by app.js ('fieldline-tiles-v1') and are not touched here.
-const VERSION = 9;
+const VERSION = 10;
 const SHELL = 'fieldline-shell-v' + VERSION;
 const RUNTIME = 'fieldline-runtime-v1';
 const FILES = [
-  'index.html', 'app.js', 'app.css', 'manifest.webmanifest', 'airports.json',
+  './', 'app.js', 'app.css', 'manifest.webmanifest', 'airports.json',
   'vendor/maplibre-gl.js', 'vendor/maplibre-gl.css',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'
 ];
+
+// Hosts such as Cloudflare redirect /index.html to /. A response that went through a redirect must not
+// be served for a page load (Safari then shows nothing), so store a fresh copy without the redirect.
+async function clean(r){
+  if (!r.redirected) return r;
+  return new Response(await r.blob(), { status: r.status, statusText: r.statusText, headers: r.headers });
+}
 
 self.addEventListener('install', e => {
   e.waitUntil((async () => {
@@ -19,7 +26,7 @@ self.addEventListener('install', e => {
     await Promise.all(FILES.map(async f => {
       const r = await fetch(f, { cache: 'reload' });
       if (!r.ok) throw new Error(f + ' ' + r.status);
-      await cache.put(f, r);
+      await cache.put(f, await clean(r));
     }));
     await self.skipWaiting();
   })());
@@ -42,11 +49,12 @@ self.addEventListener('fetch', e => {
     const scope = new URL(self.registration.scope).pathname;
     const rel = url.pathname.startsWith(scope) ? url.pathname.slice(scope.length) : url.pathname.replace(/^\//, '');
     if (rel === 'sw.js') return;                       // the browser checks this against the server itself
-    const key = req.mode === 'navigate' || rel === '' ? 'index.html' : rel;
+    const key = req.mode === 'navigate' || rel === '' || rel === 'index.html' ? './' : rel;
     e.respondWith((async () => {
       const hit = await (await caches.open(SHELL)).match(key);
-      if (hit) return hit;
-      try { return await fetch(req); } catch (err) { return new Response('Offline', { status: 503 }); }
+      if (hit && !hit.redirected) return hit;
+      try { return await clean(await fetch(req)); }
+      catch (err) { return hit ? clean(hit) : new Response('Offline', { status: 503 }); }
     })());
     return;
   }
