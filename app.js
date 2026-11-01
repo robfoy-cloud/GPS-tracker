@@ -99,8 +99,14 @@ function realURL(u){
 maplibregl.addProtocol('cached', async (params, ac) => {
   const url = realURL(params.url);
   if (!url) throw Object.assign(new Error('Unrecognised map request '+params.url), {notSaved:true});
-  const data = await cachedArrayBuffer(url, ac.signal);
-  return {data};
+  try {
+    return {data: await cachedArrayBuffer(url, ac.signal)};
+  } catch (e) {
+    // A missing font file must not sink the whole map piece: the map discards a piece if any of its
+    // labels can't get its letters. Give an empty font instead; only those characters go missing.
+    if (e.notSaved && /\/fonts\//.test(url)) return {data: new ArrayBuffer(0)};
+    throw e;
+  }
 });
 
 /* ---------------- state ---------------- */
@@ -394,8 +400,8 @@ function styleExtras(){
   if(st.glyphs){
     const fonts=new Set();
     for(const l of st.layers){ const f=l.layout?.['text-font']; if(Array.isArray(f)&&f.every(x=>typeof x==='string')) fonts.add(f.join(',')); }
-    // Latin, Latin Extended (Maltese, Polish, Czech...), Greek, Cyrillic
-    for(const f of fonts) for(const r of [0,1,2,3,4]) assets.push(st.glyphs.replace('{fontstack}',f).replace('{range}',`${256*r}-${256*r+255}`));
+    // Latin, Latin Extended, Greek, Cyrillic, Hebrew and Arabic (place names are also shown in local script)
+    for(const f of fonts) for(const r of [0,1,2,3,4,5,6]) assets.push(st.glyphs.replace('{fontstack}',f).replace('{range}',`${256*r}-${256*r+255}`));
   }
   if(typeof st.sprite==='string') for(const sfx of ['.json','.png','@2x.json','@2x.png']) assets.push(st.sprite+sfx);
   return {raster, assets};
