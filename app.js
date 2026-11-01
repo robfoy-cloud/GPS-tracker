@@ -26,16 +26,19 @@ function status(s,t){$('status').dataset.s=s;$('statusText').textContent=t;}
 
 /* ---------------- tile cache ---------------- */
 let cachePromise = null;
+const preview = lsGet('fieldline.preview', false) === true;   // offline preview: draw saved maps only
 function openCache(){ if(!('caches' in window)) return Promise.resolve(null); return cachePromise ||= caches.open(TILE_CACHE).catch(()=>null); }
 async function cachedArrayBuffer(url, signal){
   const c = await openCache();
   const hit = c && await c.match(url);
   if (hit) return hit.arrayBuffer();
+  // Not saved: in offline preview, or with no connection, the map falls back to a coarser saved tile.
+  if (preview) throw new Error('offline preview');
   let r;
-  try { r = await fetch(url, {signal, mode:'cors'}); }
-  catch (e) { if (e.name === 'AbortError') throw e; throw new Error('offline'); }   // not cached and offline: the map falls back to a coarser saved tile
+  // no-store: never draw from the phone's short-term web cache, so offline shows only saved maps
+  try { r = await fetch(url, {signal, mode:'cors', cache:'no-store'}); }
+  catch (e) { if (e.name === 'AbortError') throw e; throw new Error('offline'); }
   if (!r.ok) return new ArrayBuffer(0);
-  if (c) c.put(url, r.clone()).catch(()=>{});
   return r.arrayBuffer();
 }
 async function fetchJSONWithTimeout(url, ms){
@@ -528,12 +531,22 @@ let clearArm=false;
 $('bClear').onclick=async()=>{
   if(!clearArm){ clearArm=true; $('bClear').textContent='Tap again to delete'; setTimeout(()=>{clearArm=false;$('bClear').textContent='Delete all offline maps';},3000); return; }
   clearArm=false; $('bClear').textContent='Delete all offline maps';
-  try{ await caches.delete(TILE_CACHE); }catch(e){}
-  cachePromise=null; lsSet(K.areas,[]); journey=null; lsSet('fieldline.journey',null); drawJourney(); renderAreas(); estimate(); toast('Offline maps deleted.');
+  try{ await caches.delete(TILE_CACHE); await caches.delete('fieldline-runtime-v1'); }catch(e){}
+  cachePromise=null; lsSet(K.areas,[]); journey=null; lsSet('fieldline.journey',null); drawJourney(); renderAreas(); estimate();
+  // Reload so the map drops tiles it is still holding in memory
+  if(!rec){ lsSet('fieldline.toast','Offline maps deleted.'); location.reload(); } else toast('Offline maps deleted. The map updates after you stop recording.');
 };
 
 /* ---------------- connectivity + layout ---------------- */
-function net(){ $('net').hidden=navigator.onLine; }
+function net(){ $('net').hidden=navigator.onLine && !preview; $('net').textContent = preview ? 'Offline preview' : 'Offline'; }
+$('tPreview').checked=preview;
+$('tPreview').onchange=e=>{
+  if(rec){ e.target.checked=preview; toast('Stop recording first.'); return; }
+  lsSet('fieldline.preview', e.target.checked);
+  lsSet('fieldline.toast', e.target.checked ? 'Offline preview on: only saved maps are shown.' : 'Offline preview off.');
+  location.reload();
+};
+{ const t=lsGet('fieldline.toast',null); if(t){ lsSet('fieldline.toast',null); setTimeout(()=>toast(t),600); } }
 addEventListener('online',net); addEventListener('offline',net); net();
 new ResizeObserver(()=>document.documentElement.style.setProperty('--dock-h',$('dock').offsetHeight+'px')).observe($('dock'));
 

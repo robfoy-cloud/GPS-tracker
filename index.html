@@ -47,6 +47,11 @@
 
 <section class="sheet" id="pOffline" hidden aria-labelledby="hOff">
   <div class="sheet-head"><h2 id="hOff">Offline map</h2><button class="x" data-close aria-label="Close">✕</button></div>
+  <label class="switch" for="tPreview">
+    <input type="checkbox" id="tPreview">
+    <span class="track" aria-hidden="true"></span>
+    <span><b>Offline preview</b>Show only the maps saved on this phone, as you'll see them with no signal.</span>
+  </label>
   <div class="dl" id="oProg" hidden>
     <div class="dl-row"><span id="oProgT">Saving map</span><button id="bCancelSave">Cancel</button></div>
     <div class="progress"><div id="oBar"></div></div>
@@ -89,7 +94,7 @@
   <h3>Saved maps</h3>
   <ul class="areas" id="areas"></ul>
   <div class="row"><button class="danger" id="bClear">Delete all offline maps</button></div>
-  <p class="ver">Fieldline version 5 · 1 Nov 2026</p>
+  <p class="ver">Fieldline version 6 · 1 Nov 2026</p>
 </section>
 
 <section class="sheet" id="pTracks" hidden aria-labelledby="hTr">
