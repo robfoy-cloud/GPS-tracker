@@ -6,9 +6,11 @@ const $ = id => document.getElementById(id);
 const STYLE_URL = 'https://tiles.openfreemap.org/styles/liberty';
 const TILE_CACHE = 'fieldline-tiles-v1';
 const K = { tracks:'fieldline.tracks.v2', last:'fieldline.lastpos', style:'fieldline.style', tj:'fieldline.tilejson', areas:'fieldline.areas' };
-const MAX_Z = 14;            // vector tiles stop at z14; the map overzooms beyond
-const MAX_TILES = 6000;
-const AVG_TILE_KB = 35;
+const MAX_TILES = 15000;
+// Saved-map detail levels: highest zoom stored. Vector tiles stop at z14; the map overzooms beyond.
+const DETAIL = { overview:{z:6, label:'Overview'}, region:{z:9, label:'Region'}, street:{z:14, label:'Street'} };
+// Rough average tile size by zoom, for the size estimate only.
+const tileKB = z => z<=5?180 : z<=7?110 : z<=10?60 : 35;
 
 /* ---------------- small helpers ---------------- */
 const R = 6371008.8, rad = d => d * Math.PI / 180;
@@ -31,7 +33,7 @@ async function cachedArrayBuffer(url, signal){
   if (hit) return hit.arrayBuffer();
   let r;
   try { r = await fetch(url, {signal, mode:'cors'}); }
-  catch (e) { if (e.name === 'AbortError') throw e; return new ArrayBuffer(0); }   // offline and not cached: blank tile
+  catch (e) { if (e.name === 'AbortError') throw e; throw new Error('offline'); }   // not cached and offline: the map falls back to a coarser saved tile
   if (!r.ok) return new ArrayBuffer(0);
   if (c) c.put(url, r.clone()).catch(()=>{});
   return r.arrayBuffer();
@@ -71,7 +73,7 @@ maplibregl.addProtocol('cached', async (params, ac) => {
 
 /* ---------------- state ---------------- */
 let map = null, mapReady = false;
-let last = null, follow = true, firstFix = true, watchId = null;
+let last = null, follow = true, firstFix = true, watchId = null, bearing = 0;
 let rec = null, paused = false, wake = null;
 let tracks = lsGet(K.tracks, []);
 let shown = null;   // saved track drawn on the map
@@ -103,18 +105,33 @@ async function initMap(){
     map.addSource('me',{type:'geojson',data:empty});
     map.addSource('trk',{type:'geojson',data:empty});
     map.addSource('saved',{type:'geojson',data:empty});
+    map.addSource('route',{type:'geojson',data:empty});
+    map.addLayer({id:'route-line',type:'line',source:'route',filter:['==','$type','LineString'],layout:{'line-cap':'round'},paint:{'line-color':'#1A73E8','line-width':2.5,'line-dasharray':[2,2],'line-opacity':.8}});
+    map.addLayer({id:'route-ends',type:'circle',source:'route',filter:['==','$type','Point'],paint:{'circle-radius':6,'circle-color':'#FFFFFF','circle-stroke-color':'#1A73E8','circle-stroke-width':3}});
     map.addLayer({id:'saved-line',type:'line',source:'saved',layout:{'line-join':'round','line-cap':'round'},paint:{'line-color':'#5B3FA8','line-width':4,'line-opacity':.85}});
     map.addLayer({id:'trk-case',type:'line',source:'trk',layout:{'line-join':'round','line-cap':'round'},paint:{'line-color':'#FFFFFF','line-width':7}});
     map.addLayer({id:'trk-line',type:'line',source:'trk',layout:{'line-join':'round','line-cap':'round'},paint:{'line-color':'#C9440E','line-width':4}});
     map.addLayer({id:'acc-fill',type:'fill',source:'acc',paint:{'fill-color':'#1A73E8','fill-opacity':.14}});
     map.addLayer({id:'acc-line',type:'line',source:'acc',paint:{'line-color':'#1A73E8','line-width':1,'line-opacity':.5}});
-    map.addLayer({id:'me-halo',type:'circle',source:'me',paint:{'circle-radius':11,'circle-color':'#FFFFFF'}});
-    map.addLayer({id:'me-dot',type:'circle',source:'me',paint:{'circle-radius':7.5,'circle-color':'#1A73E8'}});
+    map.addImage('jet', jetImage(), {pixelRatio:2});
+    map.addLayer({id:'me-jet',type:'symbol',source:'me',layout:{'icon-image':'jet','icon-rotate':['get','brg'],
+      'icon-rotation-alignment':'map','icon-allow-overlap':true,'icon-ignore-placement':true}});
     mapReady = true;
-    drawPosition(); drawTrack(); drawSaved();
+    drawPosition(); drawTrack(); drawSaved(); drawJourney();
   });
 }
 
+/* Small top-down jet, nose up (north); rotated to the direction of travel on the map. */
+function jetImage(){
+  const n=72, c=document.createElement('canvas'); c.width=c.height=n; const g=c.getContext('2d');
+  const k=n/64; g.scale(k,k);
+  const P=[[32,2],[35.5,9],[35.5,25],[61,40],[61,45],[35.5,38],[35,51],[44,57.5],[44,61.5],[32,58.5],[20,61.5],[20,57.5],[29,51],[28.5,38],[3,45],[3,40],[28.5,25],[28.5,9]];
+  g.beginPath(); P.forEach(([x,y],i)=>i?g.lineTo(x,y):g.moveTo(x,y)); g.closePath();
+  g.lineJoin='round'; g.lineWidth=4; g.strokeStyle='#FFFFFF'; g.stroke();
+  g.fillStyle='#1A73E8'; g.fill();
+  return g.getImageData(0,0,n,n);
+}
+function brg(a,b){const y=Math.sin(rad(b.lon-a.lon))*Math.cos(rad(b.lat)),x=Math.cos(rad(a.lat))*Math.sin(rad(b.lat))-Math.sin(rad(a.lat))*Math.cos(rad(b.lat))*Math.cos(rad(b.lon-a.lon));return (Math.atan2(y,x)*180/Math.PI+360)%360;}
 function accCircle(p){
   const n=48, coords=[], r=Math.max(p.acc||0,1);
   for(let i=0;i<=n;i++){const a=i/n*2*Math.PI;coords.push([p.lon+r*Math.cos(a)/(111320*Math.cos(rad(p.lat))),p.lat+r*Math.sin(a)/110574]);}
@@ -122,7 +139,7 @@ function accCircle(p){
 }
 function drawPosition(){
   if(!mapReady||!last) return;
-  map.getSource('me').setData({type:'Feature',geometry:{type:'Point',coordinates:[last.lon,last.lat]}});
+  map.getSource('me').setData({type:'Feature',properties:{brg:bearing},geometry:{type:'Point',coordinates:[last.lon,last.lat]}});
   map.getSource('acc').setData(last.acc ? accCircle(last) : empty);
 }
 const line = pts => pts.length>1 ? {type:'Feature',geometry:{type:'LineString',coordinates:pts.map(p=>[p.lon,p.lat])}} : empty;
@@ -131,7 +148,7 @@ function drawSaved(){ if(mapReady) map.getSource('saved').setData(shown?line(sho
 
 function setFollow(on){
   follow = on; $('bFollow').setAttribute('aria-pressed', String(on));
-  if(on && last && map) map.easeTo({center:[last.lon,last.lat], zoom:Math.max(map.getZoom(),15), duration:500});
+  if(on && last && map) map.easeTo({center:[last.lon,last.lat], zoom:Math.max(map.getZoom(),(last.spd||0)>40?6:15), duration:500});
 }
 $('bFollow').onclick = () => { if(!last){ toast('No position fix yet.'); return; } setFollow(true); };
 
@@ -141,7 +158,7 @@ function startGPS(){
   status('search','Finding position');
   watchId = navigator.geolocation.watchPosition(onPos, onErr, {enableHighAccuracy:true, maximumAge:0, timeout:30000});
 }
-let lastSave = 0;
+let lastSave = 0, headFrom = null;
 function onPos(pos){
   const c = pos.coords;
   const p = {lat:c.latitude, lon:c.longitude, acc:c.accuracy, ele:c.altitude, spd:c.speed, t:pos.timestamp};
@@ -149,6 +166,10 @@ function onPos(pos){
   if(!rec) status('live','GPS ±'+Math.round(c.accuracy)+' m');
   if($('banner').dataset.kind==='gps') { banner(null); $('banner').dataset.kind=''; }
   if(Date.now()-lastSave>30000){ lsSet(K.last,{lat:p.lat,lon:p.lon}); lastSave=Date.now(); }
+  // Direction of travel: the GPS heading when moving, otherwise the bearing from the last clearly separate fix.
+  if(isFinite(c.heading) && c.heading!==null && (c.speed||0)>1) bearing=c.heading;
+  else if(headFrom && hav(headFrom,p) > Math.max(8, p.acc)) bearing=brg(headFrom,p);
+  if(!headFrom || hav(headFrom,p) > Math.max(8, p.acc)) headFrom=p;
   if(p.spd==null||isNaN(p.spd)){ p.spd = prev ? (()=>{const dt=(p.t-prev.t)/1000;return dt>0?hav(prev,p)/dt:0;})() : null; }
 
   if(rec && !paused){
@@ -159,7 +180,7 @@ function onPos(pos){
     }
   }
   if(map){
-    if(firstFix){ firstFix=false; map.jumpTo({center:[p.lon,p.lat], zoom:Math.max(map.getZoom(),16)}); }
+    if(firstFix){ firstFix=false; map.jumpTo({center:[p.lon,p.lat], zoom:Math.max(map.getZoom(),(p.spd||0)>40?7:16)}); }
     else if(follow) map.easeTo({center:[p.lon,p.lat], duration:600});
   }
   drawPosition(); readouts();
@@ -177,7 +198,7 @@ function onErr(err){
 /* ---------------- readouts ---------------- */
 function trackStats(pts){
   let d=0, mv=0;
-  for(let i=1;i<pts.length;i++){const a=pts[i-1],b=pts[i],seg=hav(a,b),dt=(b.t-a.t)/1000;d+=seg;if(dt>0&&dt<60&&seg/dt>0.3)mv+=dt;}
+  for(let i=1;i<pts.length;i++){const a=pts[i-1],b=pts[i],seg=hav(a,b),dt=(b.t-a.t)/1000;d+=seg;if(dt>0&&dt<900&&seg/dt>0.3)mv+=dt;}
   return {d, mv};
 }
 function readouts(){
@@ -186,7 +207,8 @@ function readouts(){
   $('rTime').textContent = fmtT(rec ? (Date.now()-rec.startedAt-rec.pausedMs-(paused?Date.now()-paused:0))/1000 : 0);
   $('rSpd').innerHTML = (last&&last.spd!=null ? (last.spd*3.6).toFixed(1) : '–')+'<small>km/h</small>';
   $('rAcc').innerHTML = (last ? '±'+Math.round(last.acc) : '–')+'<small>m</small>';
-  $('rPos').textContent = last ? dm(last.lat,'N','S')+'  '+dm(last.lon,'E','W')+(last.ele!=null?'  ·  '+Math.round(last.ele)+' m':'') : 'Waiting for a position fix';
+  const togo = (journey&&last) ? '  ·  '+Math.round(hav(last,journey.to)/1000).toLocaleString()+' km to '+journey.to.name : '';
+  $('rPos').textContent = last ? dm(last.lat,'N','S')+'  '+dm(last.lon,'E','W')+(last.ele!=null?'  ·  '+Math.round(last.ele).toLocaleString()+' m / '+Math.round(last.ele*3.28084).toLocaleString()+' ft':'')+togo : 'Waiting for a position fix';
 }
 setInterval(()=>{ if(rec) readouts(); }, 1000);
 
@@ -222,7 +244,7 @@ $('bStop').onclick = () => {
 };
 
 /* ---------------- sheets ---------------- */
-function openSheet(id){ document.querySelectorAll('.sheet').forEach(s=>s.hidden = s.id!==id); if(id==='pOffline'){estimate();renderAreas();} if(id==='pTracks') renderTracks(); }
+function openSheet(id){ document.querySelectorAll('.sheet').forEach(s=>s.hidden = s.id!==id); if(id==='pOffline'){estimate();renderAreas();planJourney();} if(id==='pTracks') renderTracks(); }
 document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>b.closest('.sheet').hidden=true);
 $('bTracks').onclick = () => openSheet('pTracks');
 $('bOffline').onclick = () => openSheet('pOffline');
@@ -282,13 +304,14 @@ $('fImp').onchange=async e=>{
 /* ---------------- offline areas ---------------- */
 const lon2x=(lon,z)=>Math.floor((lon+180)/360*2**z);
 const lat2y=(lat,z)=>{const r=rad(Math.max(-85.05,Math.min(85.05,lat)));return Math.floor((1-Math.log(Math.tan(r)+1/Math.cos(r))/Math.PI)/2*2**z);};
+const detail = () => (document.querySelector('input[name="detail"]:checked')||{}).value || 'overview';
 function tileList(b){
   const tj=lsGet(K.tj,null); if(!tj) return [];
-  const tpl=tj.tiles[0], maxz=Math.min(tj.maxzoom||14, MAX_Z), out=[];
+  const tpl=tj.tiles[0], maxz=Math.min(tj.maxzoom||14, DETAIL[detail()].z), out=[];
   for(let z=0; z<=maxz; z++){
     const x0=lon2x(b.getWest(),z), x1=lon2x(b.getEast(),z), y0=lat2y(b.getNorth(),z), y1=lat2y(b.getSouth(),z);
     if((x1-x0+1)*(y1-y0+1)+out.length > MAX_TILES*2) return null;
-    for(let x=x0;x<=x1;x++) for(let y=y0;y<=y1;y++) out.push(tpl.replace('{z}',z).replace('{x}',x).replace('{y}',y));
+    for(let x=x0;x<=x1;x++) for(let y=y0;y<=y1;y++) out.push({z,u:tpl.replace('{z}',z).replace('{x}',x).replace('{y}',y)});
   }
   return out;
 }
@@ -298,52 +321,179 @@ function estimate(){
   if(!map){ $('oTiles').textContent='–'; $('oSize').textContent='–'; $('bSaveArea').disabled=true; return; }
   const list=tileList(map.getBounds());
   const w=$('oWarn');
-  if(!list||list.length>MAX_TILES){ $('oTiles').textContent='Too many'; $('oSize').textContent='–'; w.textContent='That area is too large. Zoom in to a town or island, then save.'; w.hidden=false; $('bSaveArea').disabled=true; return; }
-  w.hidden=true; $('bSaveArea').disabled=!!saving;
-  $('oTiles').textContent=list.length.toLocaleString(); $('oSize').textContent='≈ '+fmtMB(list.length*AVG_TILE_KB*1000);
+  if(!list||list.length>MAX_TILES){ $('oTiles').textContent='Too many'; $('oSize').textContent='–';
+    w.textContent = detail()==='overview' ? 'That area is too large even at overview detail. Zoom in a little.' : 'Too large at this detail. Choose a lower detail level or zoom in.';
+    w.hidden=false; $('bSaveArea').disabled=true; return; }
+  const bytes=list.reduce((a,t)=>a+tileKB(t.z)*1000,0);
+  w.textContent='That is a large download. Use Wi-Fi and keep this screen open until it finishes.';
+  w.hidden = bytes < 150e6; $('bSaveArea').disabled=!!saving;
+  $('oTiles').textContent=list.length.toLocaleString(); $('oSize').textContent='≈ '+fmtMB(bytes);
 }
 let saving=null;
-$('bSaveArea').onclick=async()=>{
-  if(!map||saving) return;
-  if(!navigator.onLine){ toast('Connect to the internet to save an area.'); return; }
-  const b=map.getBounds(), list=tileList(b); if(!list||!list.length) return;
-  const c=await openCache(); if(!c){ toast('This browser cannot store map tiles.'); return; }
+/* Downloads tile URLs into the offline cache. Resolves {cancelled, failed}, or null if it could not start. */
+async function downloadTiles(urls, label){
+  if(saving) return null;
+  if(!navigator.onLine){ toast('Connect to the internet to save maps.'); return null; }
+  const c=await openCache(); if(!c){ toast('This browser cannot store map tiles.'); return null; }
   try{ await navigator.storage?.persist?.(); }catch(e){}
-  saving={cancel:false}; const job=saving;
-  $('bSaveArea').disabled=true; $('bCancelSave').hidden=false; $('oProg').hidden=false;
+  saving={cancel:false}; const job=saving; lockScreen();
+  $('bSaveArea').disabled=true; $('bSaveJourney').disabled=true;
+  $('oProg').hidden=false; $('oProgT').textContent=label;
   let done=0, failed=0, i=0;
   const worker=async()=>{
-    while(i<list.length && !job.cancel){
-      const u=list[i++];
+    while(i<urls.length && !job.cancel){
+      const u=urls[i++];
       try{
         if(!(await c.match(u))){ const r=await fetch(u,{mode:'cors'}); if(r.ok) await c.put(u,r); else if(r.status!==404 && r.status!==204) failed++; }
       }catch(e){ failed++; }
-      done++; $('oBar').style.width=(done/list.length*100).toFixed(1)+'%';
+      done++; $('oBar').style.width=(done/urls.length*100).toFixed(1)+'%';
+      $('oProgT').textContent=label+' · '+Math.floor(done/urls.length*100)+'%';
     }
   };
   await Promise.all(Array.from({length:6},worker));
-  saving=null; $('bCancelSave').hidden=true; $('oProg').hidden=true; $('oBar').style.width='0';
-  if(job.cancel){ toast('Stopped. Tiles already saved are kept.'); }
-  else{
-    const areas=lsGet(K.areas,[]);
-    const c0=b.getCenter();
-    areas.unshift({name:dm(c0.lat,'N','S')+' '+dm(c0.lng,'E','W'), date:Date.now(), tiles:list.length, b:[b.getWest(),b.getSouth(),b.getEast(),b.getNorth()]});
-    lsSet(K.areas,areas);
-    toast(failed?`Saved, but ${failed} tiles failed. Try again on a better connection.`:'Area saved for offline use.');
-  }
-  estimate(); renderAreas();
+  saving=null; if(!rec){ try{ wake?.release(); }catch(e){} wake=null; }
+  $('oProg').hidden=true; $('oBar').style.width='0';
+  if(job.cancel) toast('Stopped. Maps already saved are kept.');
+  else if(failed) toast(`Saved, but ${failed} tiles failed. Save again on a better connection to fill the gaps.`);
+  estimate(); planJourney();
+  return {cancelled:job.cancel, failed};
+}
+$('bSaveArea').onclick=async()=>{
+  if(!map) return;
+  const b=map.getBounds(), list=tileList(b); if(!list||!list.length) return;
+  const res=await downloadTiles(list.map(t=>t.u), 'Saving area');
+  if(!res||res.cancelled) return;
+  const areas=lsGet(K.areas,[]), c0=b.getCenter();
+  areas.unshift({name:dm(c0.lat,'N','S')+' '+dm(c0.lng,'E','W'), detail:detail(), date:Date.now(), tiles:list.length, b:[b.getWest(),b.getSouth(),b.getEast(),b.getNorth()]});
+  lsSet(K.areas,areas); renderAreas();
+  if(!res.failed) toast('Area saved for offline use.');
 };
+
+/* ---------------- journeys ---------------- */
+const J = {from:null, to:null};
+let journey = lsGet('fieldline.journey', null);   // the route drawn on the map: {from,to,...}
+function gcPoints(a,b,stepKm){
+  const p1=[rad(a.lat),rad(a.lon)], p2=[rad(b.lat),rad(b.lon)];
+  const d=hav(a,b)/R, n=Math.max(1,Math.ceil(d*R/1000/stepKm)), out=[];
+  for(let i=0;i<=n;i++){
+    const f=i/n; if(d===0){out.push({lat:a.lat,lon:a.lon});continue;}
+    const A=Math.sin((1-f)*d)/Math.sin(d), B=Math.sin(f*d)/Math.sin(d);
+    const x=A*Math.cos(p1[0])*Math.cos(p1[1])+B*Math.cos(p2[0])*Math.cos(p2[1]);
+    const y=A*Math.cos(p1[0])*Math.sin(p1[1])+B*Math.cos(p2[0])*Math.sin(p2[1]);
+    const z=A*Math.sin(p1[0])+B*Math.sin(p2[0]);
+    out.push({lat:Math.atan2(z,Math.hypot(x,y))*180/Math.PI, lon:Math.atan2(y,x)*180/Math.PI});
+  }
+  return out;
+}
+// Tiles covering a box of radius km around a point, for zooms z0..z1
+function addBox(set, tpl, p, km, z0, z1){
+  const dLat=km/110.574, dLon=km/(111.32*Math.max(0.05,Math.cos(rad(p.lat))));
+  for(let z=z0;z<=z1;z++){
+    const x0=lon2x(Math.max(-180,p.lon-dLon),z), x1=lon2x(Math.min(179.9999,p.lon+dLon),z);
+    const y0=lat2y(p.lat+dLat,z), y1=lat2y(p.lat-dLat,z);
+    for(let x=x0;x<=x1;x++) for(let y=y0;y<=y1;y++) set.set(z+'/'+x+'/'+y, z);
+  }
+}
+function journeyTiles(a,b){
+  const tj=lsGet(K.tj,null); if(!tj) return null;
+  const tpl=tj.tiles[0], set=new Map(), maxz=Math.min(tj.maxzoom||14,14);
+  // flight path: wide overview corridor, narrower corridor with towns
+  for(const p of gcPoints(a,b,25)){ addBox(set,tpl,p,250,0,6); addBox(set,tpl,p,40,7,8); }
+  // departure and arrival: region around, streets close in
+  for(const p of [a,b]){ addBox(set,tpl,p,35,0,12); addBox(set,tpl,p,10,13,maxz); }
+  const urls=[], zs=[];
+  for(const [k,z] of set){ const [zz,x,y]=k.split('/'); urls.push(tpl.replace('{z}',zz).replace('{x}',x).replace('{y}',y)); zs.push(z); }
+  return {urls, bytes:zs.reduce((s,z)=>s+tileKB(z)*1000,0)};
+}
+function planJourney(){
+  const ok=J.from&&J.to;
+  $('jEst').hidden=!ok;
+  if(!ok){ $('bSaveJourney').disabled=true; return; }
+  const plan=journeyTiles(J.from,J.to);
+  $('jDist').innerHTML=Math.round(hav(J.from,J.to)/1000).toLocaleString()+'<small>km</small>';
+  if(!plan){ $('jTiles').textContent='–'; $('jSize').textContent='–'; $('bSaveJourney').disabled=true; return; }
+  $('jTiles').textContent=plan.urls.length.toLocaleString(); $('jSize').textContent='≈ '+fmtMB(plan.bytes);
+  $('bSaveJourney').disabled=!!saving||plan.urls.length>MAX_TILES*2;
+}
+function setPlace(which, place){
+  J[which]=place; const inp=$(which==='from'?'jFrom':'jTo');
+  inp.value=place?place.name:''; inp.classList.toggle('set',!!place);
+  $(which==='from'?'rFrom':'rTo').hidden=true; planJourney();
+}
+function placeLabel(f){
+  const p=f.properties, parts=[p.city&&p.city!==p.name?p.city:null, p.state, p.country].filter(Boolean);
+  return {name:p.name||p.city||p.country||'Unnamed place', sub:parts.join(', ')};
+}
+function wireSearch(which){
+  const inp=$(which==='from'?'jFrom':'jTo'), ul=$(which==='from'?'rFrom':'rTo');
+  let t=null, ac=null;
+  const msg=m=>{ul.textContent='';const li=document.createElement('li');li.className='msg';li.textContent=m;ul.appendChild(li);ul.hidden=false;};
+  inp.addEventListener('input',()=>{
+    J[which]=null; inp.classList.remove('set'); planJourney();
+    clearTimeout(t); const q=inp.value.trim();
+    if(q.length<3){ ul.hidden=true; return; }
+    t=setTimeout(async()=>{
+      if(!navigator.onLine){ msg('Place search needs a connection.'); return; }
+      ac?.abort(); ac=new AbortController();
+      try{
+        const r=await fetch('https://photon.komoot.io/api/?limit=6&q='+encodeURIComponent(q),{signal:ac.signal});
+        const js=await r.json();
+        ul.textContent='';
+        if(!js.features?.length){ msg('No places found. Try a city name.'); return; }
+        for(const f of js.features){
+          const L=placeLabel(f), li=document.createElement('li'), b=document.createElement('button');
+          b.textContent=L.name; const sm=document.createElement('small'); sm.textContent=L.sub; b.appendChild(sm);
+          b.onclick=()=>setPlace(which,{name:L.name,lat:f.geometry.coordinates[1],lon:f.geometry.coordinates[0]});
+          li.appendChild(b); ul.appendChild(li);
+        }
+        ul.hidden=false;
+      }catch(e){ if(e.name!=='AbortError') msg('Place search failed. Check your connection.'); }
+    },350);
+  });
+}
+wireSearch('from'); wireSearch('to');
+$('bFromHere').onclick=()=>{ if(!last){ toast('No position fix yet.'); return; } setPlace('from',{name:'My position',lat:+last.lat.toFixed(5),lon:+last.lon.toFixed(5)}); };
+$('bSaveJourney').onclick=async()=>{
+  if(!J.from||!J.to) return;
+  const plan=journeyTiles(J.from,J.to); if(!plan) return;
+  const res=await downloadTiles(plan.urls,'Saving '+J.from.name+' → '+J.to.name);
+  if(!res||res.cancelled) return;
+  const areas=lsGet(K.areas,[]);
+  const lats=[J.from.lat,J.to.lat], lons=[J.from.lon,J.to.lon];
+  areas.unshift({journey:true, name:J.from.name+' → '+J.to.name, from:J.from, to:J.to, date:Date.now(), tiles:plan.urls.length,
+    b:[Math.min(...lons),Math.min(...lats),Math.max(...lons),Math.max(...lats)]});
+  lsSet(K.areas,areas);
+  showJourney({from:J.from,to:J.to});
+  renderAreas();
+  if(!res.failed) toast('Journey maps saved. The route is on the map.');
+};
+function showJourney(j){
+  journey=j; lsSet('fieldline.journey',j); drawJourney(); readouts();
+}
+function drawJourney(){
+  if(!mapReady) return;
+  const src=map.getSource('route'); if(!src) return;
+  if(!journey){ src.setData(empty); return; }
+  const pts=gcPoints(journey.from,journey.to,20);
+  src.setData({type:'FeatureCollection',features:[
+    {type:'Feature',properties:{},geometry:{type:'LineString',coordinates:pts.map(p=>[p.lon,p.lat])}},
+    {type:'Feature',properties:{end:1},geometry:{type:'Point',coordinates:[journey.from.lon,journey.from.lat]}},
+    {type:'Feature',properties:{end:1},geometry:{type:'Point',coordinates:[journey.to.lon,journey.to.lat]}}]});
+}
+document.querySelectorAll('input[name="detail"]').forEach(r=>r.onchange=()=>{try{localStorage.setItem('fieldline.detail',r.value);}catch(e){} estimate();});
+try{const d=localStorage.getItem('fieldline.detail'); if(d&&DETAIL[d]) document.querySelector(`input[name="detail"][value="${d}"]`).checked=true;}catch(e){}
 $('bCancelSave').onclick=()=>{ if(saving) saving.cancel=true; };
 function renderAreas(){
   const ul=$('areas'); ul.textContent='';
   const areas=lsGet(K.areas,[]);
-  if(!areas.length){ const li=document.createElement('li'); li.className='none'; li.textContent='None yet. Pan to an area and tap Save this area.'; ul.appendChild(li); return; }
+  if(!areas.length){ const li=document.createElement('li'); li.className='none'; li.textContent='None yet. Plan a journey or save the area on screen.'; ul.appendChild(li); return; }
   for(const a of areas){
     const li=document.createElement('li');
-    const t=document.createElement('div'); t.textContent=new Date(a.date).toLocaleDateString(undefined,{day:'numeric',month:'short',year:'numeric'})+' · '+a.tiles.toLocaleString()+' tiles';
-    const s=document.createElement('span'); s.textContent=a.name; t.appendChild(document.createElement('br')); t.appendChild(s);
+    const t=document.createElement('div'); t.textContent=(a.journey?a.name:(DETAIL[a.detail]?.label||'Street'))+' · '+a.tiles.toLocaleString()+' tiles';
+    const s=document.createElement('span'); s.textContent=(a.journey?'Journey':a.name)+' · '+new Date(a.date).toLocaleDateString(undefined,{day:'numeric',month:'short',year:'numeric'}); t.appendChild(document.createElement('br')); t.appendChild(s);
     const go=document.createElement('button'); go.textContent='Go to';
-    go.onclick=()=>{ setFollow(false); $('pOffline').hidden=true; map?.fitBounds([[a.b[0],a.b[1]],[a.b[2],a.b[3]]],{padding:20}); };
+    go.textContent=a.journey?'Show route':'Go to';
+    go.onclick=()=>{ if(a.journey) showJourney({from:a.from,to:a.to}); setFollow(false); $('pOffline').hidden=true; map?.fitBounds([[a.b[0],a.b[1]],[a.b[2],a.b[3]]],{padding:{top:90,bottom:(parseInt(getComputedStyle(document.documentElement).getPropertyValue('--dock-h'))||200)+40,left:40,right:40},maxZoom:14}); };
     li.append(t,go); ul.appendChild(li);
   }
 }
@@ -352,7 +502,7 @@ $('bClear').onclick=async()=>{
   if(!clearArm){ clearArm=true; $('bClear').textContent='Tap again to delete'; setTimeout(()=>{clearArm=false;$('bClear').textContent='Delete all offline maps';},3000); return; }
   clearArm=false; $('bClear').textContent='Delete all offline maps';
   try{ await caches.delete(TILE_CACHE); }catch(e){}
-  cachePromise=null; lsSet(K.areas,[]); renderAreas(); estimate(); toast('Offline maps deleted.');
+  cachePromise=null; lsSet(K.areas,[]); journey=null; lsSet('fieldline.journey',null); drawJourney(); renderAreas(); estimate(); toast('Offline maps deleted.');
 };
 
 /* ---------------- connectivity + layout ---------------- */

@@ -1,6 +1,6 @@
 // Fieldline service worker: keeps the app itself and map sprites available offline.
 // Map tiles and fonts are cached by app.js in 'fieldline-tiles-v1'.
-const SHELL = 'fieldline-shell-v2';
+const SHELL = 'fieldline-shell-v3';
 const RUNTIME = 'fieldline-runtime-v1';
 const FILES = [
   './', 'index.html', 'app.js', 'app.css', 'manifest.webmanifest',

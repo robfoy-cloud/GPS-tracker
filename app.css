@@ -93,4 +93,30 @@ tr.sel td{background:color-mix(in srgb,var(--accent) 10%,transparent)}
 
 .toast{position:fixed;left:50%;transform:translateX(-50%);top:calc(60px + env(safe-area-inset-top,0px));z-index:20;background:var(--fg);color:var(--bg);padding:10px 14px;border-radius:6px;font-size:14px;max-width:calc(100% - 32px)}
 
-@media (max-width:420px){.val{font-size:24px}.readouts{gap:4px}.dock{gap:8px}}
+@media (max-width:420px){.dock .val{font-size:22px}.readouts{gap:4px}.dock{gap:8px}}
+
+/* detail picker */
+.seg{border:0;padding:0;margin:0 auto;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+.seg label{cursor:pointer;min-width:0}
+.seg input{position:absolute;opacity:0;pointer-events:none}
+.seg span{display:flex;flex-direction:column;gap:3px;height:100%;padding:9px 10px;border:1px solid var(--line);border-radius:6px;font-size:12px;line-height:1.35;color:var(--muted)}
+.seg b{font-size:14px;color:var(--fg)}
+.seg input:checked+span{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent);background:color-mix(in srgb,var(--accent) 7%,transparent)}
+.seg input:focus-visible+span{outline:2px solid var(--accent);outline-offset:2px}
+
+/* journey planner */
+.place{display:flex;flex-direction:column;gap:6px}
+.place>label{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600}
+.place .row{flex-wrap:nowrap}
+.place input{flex:1;min-width:0;font:16px var(--body);padding:11px 12px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg)}
+.place input:focus{outline:2px solid var(--accent);outline-offset:1px}
+.place input.set{border-color:var(--ok)}
+.results{list-style:none;margin:0;padding:0;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.results li+li{border-top:1px solid var(--line)}
+.results button{width:100%;border:0;border-radius:0;justify-content:flex-start;text-align:left;font-weight:500;line-height:1.3;padding:10px 12px;display:block}
+.results button small{display:block;color:var(--muted);font-weight:400;font-size:12px}
+.results .msg{padding:10px 12px;color:var(--muted);font-size:13px}
+.dl{position:sticky;top:44px;z-index:1;background:var(--panel);border:1px solid var(--accent);border-radius:6px;padding:10px 12px;display:flex;flex-direction:column;gap:8px}
+.dl-row{display:flex;justify-content:space-between;align-items:center;gap:8px;font-weight:600}
+.dl-row button{padding:7px 10px;font-size:12px}
+.dl p{font-size:12px}

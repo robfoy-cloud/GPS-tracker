@@ -47,19 +47,46 @@
 
 <section class="sheet" id="pOffline" hidden aria-labelledby="hOff">
   <div class="sheet-head"><h2 id="hOff">Offline map</h2><button class="x" data-close aria-label="Close">✕</button></div>
-  <p>Saves the map for the area on screen so it still shows with no signal. Pan and zoom the map to the area you want, then save it.</p>
+  <div class="dl" id="oProg" hidden>
+    <div class="dl-row"><span id="oProgT">Saving map</span><button id="bCancelSave">Cancel</button></div>
+    <div class="progress"><div id="oBar"></div></div>
+    <p>Keep this screen open until it finishes.</p>
+  </div>
+
+  <h3>Plan a journey</h3>
+  <p>Saves street maps around where you leave and arrive, and an overview map along the flight path.</p>
+  <div class="place">
+    <label for="jFrom">From</label>
+    <div class="row"><input id="jFrom" type="search" autocomplete="off" placeholder="City or airport"><button id="bFromHere">My position</button></div>
+    <ul class="results" id="rFrom" hidden></ul>
+  </div>
+  <div class="place">
+    <label for="jTo">To</label>
+    <div class="row"><input id="jTo" type="search" autocomplete="off" placeholder="City or airport"></div>
+    <ul class="results" id="rTo" hidden></ul>
+  </div>
+  <div class="est" id="jEst" hidden>
+    <div><div class="lbl">Route</div><div class="val" id="jDist">–</div></div>
+    <div><div class="lbl">Tiles</div><div class="val" id="jTiles">–</div></div>
+    <div><div class="lbl">Approx. size</div><div class="val" id="jSize">–</div></div>
+  </div>
+  <div class="row"><button class="primary" id="bSaveJourney" disabled>Save journey maps</button></div>
+
+  <h3>Save the area on screen</h3>
+  <p>Frame the area you want, pick a detail level, then save.</p>
+  <fieldset class="seg" aria-label="Detail">
+    <label><input type="radio" name="detail" value="overview" id="dOverview" checked><span><b>Overview</b>Countries, cities, motorways. For flights.</span></label>
+    <label><input type="radio" name="detail" value="region" id="dRegion"><span><b>Region</b>Towns and main roads. For a region or road trip.</span></label>
+    <label><input type="radio" name="detail" value="street" id="dStreet"><span><b>Street</b>Every street and path. For a town or island.</span></label>
+  </fieldset>
   <div class="est">
     <div><div class="lbl">Tiles</div><div class="val" id="oTiles">–</div></div>
     <div><div class="lbl">Approx. size</div><div class="val" id="oSize">–</div></div>
     <div><div class="lbl">Stored on phone</div><div class="val" id="oUsed">–</div></div>
   </div>
   <p class="warn" id="oWarn" hidden></p>
-  <div class="progress" id="oProg" hidden><div id="oBar"></div></div>
-  <div class="row">
-    <button class="primary" id="bSaveArea">Save this area</button>
-    <button id="bCancelSave" hidden>Cancel</button>
-  </div>
-  <h3>Saved areas</h3>
+  <div class="row"><button class="primary" id="bSaveArea">Save this area</button></div>
+  <h3>Saved maps</h3>
   <ul class="areas" id="areas"></ul>
   <div class="row"><button class="danger" id="bClear">Delete all offline maps</button></div>
 </section>
