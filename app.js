@@ -63,6 +63,7 @@ async function loadStyle(){
   s.sources[srcKey] = {type:'vector', tiles:tj.tiles.map(u=>'cached://'+u), minzoom:tj.minzoom, maxzoom:tj.maxzoom,
     attribution:'<a href="https://openfreemap.org" target="_blank">OpenFreeMap</a> <a href="https://www.openmaptiles.org/" target="_blank">© OpenMapTiles</a> Data from <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>'};
   if (s.glyphs) s.glyphs = 'cached://' + s.glyphs;
+  for (const k in s.sources) if (s.sources[k].type === 'raster' && s.sources[k].tiles) s.sources[k].tiles = s.sources[k].tiles.map(u => 'cached://' + u);
   return {style:s, tj};
 }
 maplibregl.addProtocol('cached', async (params, ac) => {
@@ -304,6 +305,21 @@ $('fImp').onchange=async e=>{
 /* ---------------- offline areas ---------------- */
 const lon2x=(lon,z)=>Math.floor((lon+180)/360*2**z);
 const lat2y=(lat,z)=>{const r=rad(Math.max(-85.05,Math.min(85.05,lat)));return Math.floor((1-Math.log(Math.tan(r)+1/Math.cos(r))/Math.PI)/2*2**z);};
+/* Besides the map data, the style draws low zooms from shaded-relief images and needs fonts and icons. */
+function styleExtras(){
+  const st=lsGet(K.style,null); if(!st) return {raster:[], assets:[]};
+  const raster=Object.values(st.sources).filter(x=>x.type==='raster'&&x.tiles).map(x=>({tpl:x.tiles[0], maxz:x.maxzoom??6}));
+  const assets=[];
+  if(st.glyphs){
+    const fonts=new Set();
+    for(const l of st.layers){ const f=l.layout?.['text-font']; if(Array.isArray(f)&&f.every(x=>typeof x==='string')) fonts.add(f.join(',')); }
+    // Latin, Latin Extended (Maltese, Polish, Czech...), Greek, Cyrillic
+    for(const f of fonts) for(const r of [0,1,2,3,4]) assets.push(st.glyphs.replace('{fontstack}',f).replace('{range}',`${256*r}-${256*r+255}`));
+  }
+  if(typeof st.sprite==='string') for(const sfx of ['.json','.png','@2x.json','@2x.png']) assets.push(st.sprite+sfx);
+  return {raster, assets};
+}
+const xyz = (tpl,z,x,y) => tpl.replace('{z}',z).replace('{x}',x).replace('{y}',y);
 const detail = () => (document.querySelector('input[name="detail"]:checked')||{}).value || 'overview';
 function tileList(b){
   const tj=lsGet(K.tj,null); if(!tj) return [];
@@ -311,7 +327,7 @@ function tileList(b){
   for(let z=0; z<=maxz; z++){
     const x0=lon2x(b.getWest(),z), x1=lon2x(b.getEast(),z), y0=lat2y(b.getNorth(),z), y1=lat2y(b.getSouth(),z);
     if((x1-x0+1)*(y1-y0+1)+out.length > MAX_TILES*2) return null;
-    for(let x=x0;x<=x1;x++) for(let y=y0;y<=y1;y++) out.push({z,u:tpl.replace('{z}',z).replace('{x}',x).replace('{y}',y)});
+    for(let x=x0;x<=x1;x++) for(let y=y0;y<=y1;y++) out.push({z,x,y,u:xyz(tpl,z,x,y)});
   }
   return out;
 }
@@ -361,7 +377,9 @@ async function downloadTiles(urls, label){
 $('bSaveArea').onclick=async()=>{
   if(!map) return;
   const b=map.getBounds(), list=tileList(b); if(!list||!list.length) return;
-  const res=await downloadTiles(list.map(t=>t.u), 'Saving area');
+  const ex=styleExtras(), urls=list.map(t=>t.u);
+  for(const t of list) if(t.x!=null) for(const r of ex.raster) if(t.z<=r.maxz) urls.push(xyz(r.tpl,t.z,t.x,t.y));
+  const res=await downloadTiles(urls.concat(ex.assets), 'Saving area');
   if(!res||res.cancelled) return;
   const areas=lsGet(K.areas,[]), c0=b.getCenter();
   areas.unshift({name:dm(c0.lat,'N','S')+' '+dm(c0.lng,'E','W'), detail:detail(), date:Date.now(), tiles:list.length, b:[b.getWest(),b.getSouth(),b.getEast(),b.getNorth()]});
@@ -398,12 +416,21 @@ function journeyTiles(a,b){
   const tj=lsGet(K.tj,null); if(!tj) return null;
   const tpl=tj.tiles[0], set=new Map(), maxz=Math.min(tj.maxzoom||14,14);
   // flight path: wide overview corridor, narrower corridor with towns
+  // backdrop for the whole trip when zoomed right out
+  const half=hav(a,b)/2000+800;
+  addBox(set,tpl,{lat:(a.lat+b.lat)/2,lon:(a.lon+b.lon)/2},half,0,5);
+  for(let z=0;z<=2;z++) for(let x=0;x<2**z;x++) for(let y=0;y<2**z;y++) set.set(z+'/'+x+'/'+y,z);   // whole world, very coarse
   for(const p of gcPoints(a,b,25)){ addBox(set,tpl,p,250,0,6); addBox(set,tpl,p,40,7,8); }
   // departure and arrival: region around, streets close in
   for(const p of [a,b]){ addBox(set,tpl,p,35,0,12); addBox(set,tpl,p,10,13,maxz); }
   const urls=[], zs=[];
-  for(const [k,z] of set){ const [zz,x,y]=k.split('/'); urls.push(tpl.replace('{z}',zz).replace('{x}',x).replace('{y}',y)); zs.push(z); }
-  return {urls, bytes:zs.reduce((s,z)=>s+tileKB(z)*1000,0)};
+  const ex=styleExtras(); let extra=0;
+  for(const [k,z] of set){
+    const [zz,x,y]=k.split('/'); urls.push(xyz(tpl,zz,x,y)); zs.push(z);
+    for(const r of ex.raster) if(z<=r.maxz){ urls.push(xyz(r.tpl,zz,x,y)); extra+=40e3; }
+  }
+  urls.push(...ex.assets); extra+=ex.assets.length*60e3;
+  return {urls, tiles:set.size, bytes:zs.reduce((s,z)=>s+tileKB(z)*1000,0)+extra};
 }
 function planJourney(){
   const ok=J.from&&J.to;
@@ -412,7 +439,7 @@ function planJourney(){
   const plan=journeyTiles(J.from,J.to);
   $('jDist').innerHTML=Math.round(hav(J.from,J.to)/1000).toLocaleString()+'<small>km</small>';
   if(!plan){ $('jTiles').textContent='–'; $('jSize').textContent='–'; $('bSaveJourney').disabled=true; return; }
-  $('jTiles').textContent=plan.urls.length.toLocaleString(); $('jSize').textContent='≈ '+fmtMB(plan.bytes);
+  $('jTiles').textContent=plan.tiles.toLocaleString(); $('jSize').textContent='≈ '+fmtMB(plan.bytes);
   $('bSaveJourney').disabled=!!saving||plan.urls.length>MAX_TILES*2;
 }
 function setPlace(which, place){
@@ -460,7 +487,7 @@ $('bSaveJourney').onclick=async()=>{
   if(!res||res.cancelled) return;
   const areas=lsGet(K.areas,[]);
   const lats=[J.from.lat,J.to.lat], lons=[J.from.lon,J.to.lon];
-  areas.unshift({journey:true, name:J.from.name+' → '+J.to.name, from:J.from, to:J.to, date:Date.now(), tiles:plan.urls.length,
+  areas.unshift({journey:true, name:J.from.name+' → '+J.to.name, from:J.from, to:J.to, date:Date.now(), tiles:plan.tiles,
     b:[Math.min(...lons),Math.min(...lats),Math.max(...lons),Math.max(...lats)]});
   lsSet(K.areas,areas);
   showJourney({from:J.from,to:J.to});

@@ -1,6 +1,6 @@
 // Fieldline service worker: keeps the app itself and map sprites available offline.
 // Map tiles and fonts are cached by app.js in 'fieldline-tiles-v1'.
-const SHELL = 'fieldline-shell-v4';
+const SHELL = 'fieldline-shell-v5';
 const RUNTIME = 'fieldline-runtime-v1';
 const FILES = [
   './', 'index.html', 'app.js', 'app.css', 'manifest.webmanifest',
@@ -45,7 +45,7 @@ self.addEventListener('fetch', e => {
   if (url.hostname === 'tiles.openfreemap.org' && url.pathname.startsWith('/sprites/')) {
     e.respondWith((async () => {
       const cache = await caches.open(RUNTIME);
-      const hit = await cache.match(req);
+      const hit = await caches.match(req);
       if (hit) return hit;
       try { const r = await fetch(req); if (r.ok) cache.put(req, r.clone()); return r; }
       catch (err) { return new Response('', { status: 504 }); }
