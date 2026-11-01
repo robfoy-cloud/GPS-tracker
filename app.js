@@ -455,6 +455,32 @@ $('bSaveArea').onclick=async()=>{
   if(!res.failed) toast('Area saved for offline use.');
 };
 
+/* ---------------- check what is saved for the view on screen ---------------- */
+$('bCheck').onclick=async()=>{
+  const out=$('checkOut'); if(!map) return;
+  const tj=lsGet(K.tj,null), c=await openCache();
+  if(!tj||!c){ out.hidden=false; out.textContent='No saved maps yet.'; return; }
+  out.hidden=false; out.textContent='Checking…';
+  const b=map.getBounds(), tpl=tj.tiles[0], zNow=map.getZoom(), rows=[];
+  for(let z=0; z<=14; z++){
+    const x0=lon2x(b.getWest(),z), x1=lon2x(b.getEast(),z), y0=lat2y(b.getNorth(),z), y1=lat2y(b.getSouth(),z);
+    const n=(x1-x0+1)*(y1-y0+1);
+    if(n>300){ rows.push([z,'–','too many to check']); continue; }
+    let have=0, bytes=0;
+    for(let x=x0;x<=x1;x++) for(let y=y0;y<=y1;y++){ const r=await c.match(xyz(tpl,z,x,y)); if(r){ have++; bytes+=+(r.headers.get('content-length')||0); } }
+    rows.push([z, have+' of '+n, have===n?'all saved':have?'partly saved':'none saved']);
+  }
+  const t=document.createElement('table');
+  t.innerHTML='<thead><tr><th>Zoom</th><th>Map pieces</th><th></th></tr></thead>';
+  const tb=document.createElement('tbody');
+  for(const [z,a,w] of rows){ const tr=document.createElement('tr'); if(Math.floor(zNow)===z) tr.className='sel';
+    for(const v of [z,a,w]){ const td=document.createElement('td'); td.textContent=v; tr.appendChild(td); } tb.appendChild(tr); }
+  t.appendChild(tb); out.textContent='';
+  const note=document.createElement('p'); note.className='hint';
+  note.textContent='Screen is at zoom '+zNow.toFixed(1)+' (highlighted). Map data version '+(tpl.match(/planet\/([^/]+)\//)?.[1]||'?')+'.';
+  out.append(note,t);
+};
+
 /* ---------------- journeys ---------------- */
 const J = {from:null, to:null};
 let journey = lsGet('fieldline.journey', null);   // the route drawn on the map: {from,to,...}
@@ -486,7 +512,7 @@ function journeyTiles(a,b){
   // flight path: wide overview corridor, narrower corridor with towns
   // backdrop for the whole trip when zoomed right out
   const half=hav(a,b)/2000+800;
-  addBox(set,tpl,{lat:(a.lat+b.lat)/2,lon:(a.lon+b.lon)/2},half,0,5);
+  addBox(set,tpl,{lat:(a.lat+b.lat)/2,lon:(a.lon+b.lon)/2},half,0,6);
   for(let z=0;z<=2;z++) for(let x=0;x<2**z;x++) for(let y=0;y<2**z;y++) set.set(z+'/'+x+'/'+y,z);   // whole world, very coarse
   // Along the route: overview wide, then sharper coastlines and towns closer to the line
   for(const p of gcPoints(a,b,20)){ addBox(set,tpl,p,250,0,6); addBox(set,tpl,p,150,7,8); addBox(set,tpl,p,50,9,9); }
