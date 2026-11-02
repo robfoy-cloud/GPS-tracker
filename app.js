@@ -790,22 +790,24 @@ function icaoFor(place){
 }
 async function opensky(path, params){
   const qs=new URLSearchParams(params).toString();
-  // The browser asks OpenSky itself first (its own daily allowance); if that's blocked, it asks this site's helper
+  // 1. This device asks OpenSky itself. OpenSky blocks requests from cloud servers, so this is the route that
+  //    can work; it is slow at times, so allow 25 s.
+  let direct;
   try{
-    const r=await fetch('https://opensky-network.org/api/'+path+'?'+qs, {mode:'cors'});
+    const ac=new AbortController(), t=setTimeout(()=>ac.abort(),25000);
+    const r=await fetch('https://opensky-network.org/api/'+path+'?'+qs, {mode:'cors', signal:ac.signal}).finally(()=>clearTimeout(t));
     if(r.status===404) return [];
     if(r.ok) return await r.json();
-    if(r.status!==429 && r.status!==403 && r.status!==401) throw new Error('OpenSky '+r.status);
-  }catch(e){ /* fall through to the helper */ }
-  let r;
-  try{ r=await fetch('/api/opensky?path='+encodeURIComponent(path)+'&'+qs); }
-  catch(e){ throw new Error('no connection to this site\'s helper'); }
-  if(r.status===429) throw new Error('busy');
-  if(!r.ok){
-    let d=''; try{ const j=await r.json(); d=[j.error,j.detail].filter(Boolean).join(': '); }catch(e){ d='helper answered '+r.status; }
-    throw new Error(d||('helper answered '+r.status));
-  }
-  return r.json();
+    direct = r.status===429 ? 'busy (daily limit reached)' : 'answered '+r.status;
+  }catch(e){ direct = e.name==='AbortError' ? 'no answer within 25 s' : 'blocked or unreachable'; }
+  // 2. This site's helper (works only if OpenSky accepts requests from Cloudflare)
+  let helper;
+  try{
+    const r=await fetch('/api/opensky?path='+encodeURIComponent(path)+'&'+qs);
+    if(r.ok) return await r.json();
+    try{ const j=await r.json(); helper=(j.error||'answered '+r.status).replace(/^OpenSky /,''); }catch(e){ helper='answered '+r.status; }
+  }catch(e){ helper='unreachable'; }
+  throw new Error('from this device: '+direct+'; via the site: '+helper);
 }
 let routeJob=0, lastRouteError='none';
 async function findFlownRoute(){
