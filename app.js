@@ -338,7 +338,7 @@ function readouts(){
   const kmh = last&&last.spd!=null ? last.spd*3.6 : null;
   $('rSpd').innerHTML = (kmh==null ? '–' : kmh>=100 ? Math.round(kmh).toLocaleString() : kmh.toFixed(1))+'<small>km/h</small>';
   $('rAlt').innerHTML = (last&&last.ele!=null ? Math.round(last.ele).toLocaleString() : '–')+'<small>m</small>';
-  const togo = (journey&&last) ? '  ·  '+Math.round(hav(last,journey.to)/1000).toLocaleString()+' km to '+journey.to.name : '';
+  const togo = (journey&&last) ? '  ·  '+Math.round(remainingM(last,journey)/1000).toLocaleString()+' km to '+journey.to.name : '';
   $('rPos').textContent = last ? dm(last.lat,'N','S')+'  '+dm(last.lon,'E','W')+(last.ele!=null?'  ·  '+Math.round(last.ele).toLocaleString()+' m / '+Math.round(last.ele*3.28084).toLocaleString()+' ft':'')+togo : 'Waiting for a position fix';
 }
 setInterval(()=>{ if(rec) readouts(); showFlight(); }, 1000);
@@ -351,11 +351,12 @@ function simulateFlight(){
   // Route: the planned journey, else 600 km north-west of here
   const here = last || (map ? {lat:map.getCenter().lat, lon:map.getCenter().lng} : {lat:35.85, lon:14.48});
   let A = (journey&&journey.from) || J.from || here, B = (journey&&journey.to) || J.to;
+  const P = journey ? journey.path : (J.from&&J.to ? J.path : null);
   if(!B){ const d=600/6371, b=rad(315), la=rad(A.lat), lo=rad(A.lon);
     const la2=Math.asin(Math.sin(la)*Math.cos(d)+Math.cos(la)*Math.sin(d)*Math.cos(b));
     const lo2=lo+Math.atan2(Math.sin(b)*Math.sin(d)*Math.cos(la),Math.cos(d)-Math.sin(la)*Math.sin(la2));
     B={lat:la2*180/Math.PI, lon:lo2*180/Math.PI, name:'test destination'}; }
-  const g = A.elev ?? 60, path = gcPoints(A,B,5);
+  const g = A.elev ?? 60, path = P ? routePoints(A,B,P,5) : gcPoints(A,B,5);
   // Flight profile: [steps, speed m/s from→to, altitude m from→to]; one step = 5 s of GPS time
   // [steps, seconds of flight per step, speed m/s from→to, altitude m from→to]: about an hour gate to gate
   const prof=[[8,15,6,6,g,g],[5,6,20,78,g,g],[25,25,85,230,g+60,11000],[50,50,230,230,11000,11000],[25,30,230,85,11000,g+250],[3,10,75,35,g+40,g],[12,5,10,6,g,g]];
@@ -680,6 +681,7 @@ $('bDiag').onclick=async()=>{
     }
   }catch(e){ lines.push('Cache error: '+e.name+' '+e.message); }
   for(const a of lsGet(K.areas,[])) lines.push('Saved: '+(a.journey?'journey '+a.name:'area '+(a.detail||''))+' | '+(a.total?a.saved+'/'+a.total:a.tiles+' planned')+' | '+new Date(a.date).toISOString());
+  lines.push('Route: '+(journey?.path?journey.path.label+' ('+journey.path.pts.length+' points)':journey?'direct line':'none'));
   lines.push('Last save result: '+($('oResult').textContent||'none this session'));
   lines.push('All map errors by kind: '+JSON.stringify(window.__mapErrTally||{}));
   lines.push('Recent map errors: '+(window.__mapErrors||[]).slice(-5).join(' || '));
@@ -689,7 +691,7 @@ $('bDiag').onclick=async()=>{
 };
 
 /* ---------------- journeys ---------------- */
-const J = {from:null, to:null};
+const J = {from:null, to:null, path:null};   // path: {pts:[{lat,lon}], src:'opensky'|'file', label} when a real flight path is in use
 let journey = lsGet('fieldline.journey', null);   // the route drawn on the map: {from,to,...}
 function gcPoints(a,b,stepKm){
   const p1=[rad(a.lat),rad(a.lon)], p2=[rad(b.lat),rad(b.lon)];
@@ -704,6 +706,49 @@ function gcPoints(a,b,stepKm){
   }
   return out;
 }
+/* ---- route paths: the real flight path when known, else the great circle ---- */
+function pathKm(pts){ let d=0; for(let i=1;i<pts.length;i++) d+=hav(pts[i-1],pts[i]); return d/1000; }
+// Evenly spaced points along a path (stepKm apart), for map saving and the simulator
+function resample(pts, stepKm){
+  if(pts.length<2) return pts.slice();
+  const step=stepKm*1000, out=[pts[0]]; let carry=0;
+  for(let i=1;i<pts.length;i++){
+    const a=pts[i-1], b=pts[i], seg=hav(a,b); let at=step-carry;
+    while(at<=seg){ const f=at/seg; out.push({lat:a.lat+(b.lat-a.lat)*f, lon:a.lon+(b.lon-a.lon)*f}); at+=step; }
+    carry=seg-(at-step);
+  }
+  const L=pts[pts.length-1]; if(hav(out[out.length-1],L)>1) out.push(L);
+  return out;
+}
+function routePoints(a,b,path,stepKm){ return path&&path.pts&&path.pts.length>1 ? resample(path.pts,stepKm) : gcPoints(a,b,stepKm); }
+// Tidy a raw track: right way round, joined to both airports, gaps over the sea filled along the great circle, thinned to ~3 km
+function cleanPath(raw, a, b){
+  let pts=raw.filter(p=>p&&isFinite(p.lat)&&isFinite(p.lon)&&Math.abs(p.lat)<=90&&Math.abs(p.lon)<=180);
+  if(pts.length<2) return null;
+  if(a&&b && hav(pts[0],b)+hav(pts[pts.length-1],a) < hav(pts[0],a)+hav(pts[pts.length-1],b)) pts.reverse();
+  if(a) pts.unshift({lat:a.lat,lon:a.lon});
+  if(b) pts.push({lat:b.lat,lon:b.lon});
+  const out=[{lat:pts[0].lat,lon:pts[0].lon}];
+  for(let i=1;i<pts.length;i++){
+    const p=pts[i], q=out[out.length-1], d=hav(q,p), endPt=i===pts.length-1;
+    if(d>60000){ const g=gcPoints(q,p,20); for(let k=1;k<g.length;k++) out.push(g[k]); }
+    else if(d>=3000 || endPt) out.push({lat:+p.lat.toFixed(4), lon:+p.lon.toFixed(4)});
+  }
+  return out.length>1 ? out : null;
+}
+// Distance left along the path from position p
+function remainingM(p, j){
+  const pts=j.path&&j.path.pts;
+  if(!pts||pts.length<2) return hav(p,j.to);
+  let bi=0, bd=Infinity;
+  for(let i=0;i<pts.length;i++){ const d=hav(p,pts[i]); if(d<bd){ bd=d; bi=i; } }
+  let s=bd; for(let i=bi;i<pts.length-1;i++) s+=hav(pts[i],pts[i+1]);
+  return s;
+}
+function pathBounds(a,b,path){
+  const pts=(path&&path.pts)||[a,b], lats=pts.map(p=>p.lat), lons=pts.map(p=>p.lon);
+  return [Math.min(...lons),Math.min(...lats),Math.max(...lons),Math.max(...lats)];
+}
 // Tiles covering a box of radius km around a point, for zooms z0..z1
 function addBox(set, tpl, p, km, z0, z1){
   const dLat=km/110.574, dLon=km/(111.32*Math.max(0.05,Math.cos(rad(p.lat))));
@@ -713,7 +758,7 @@ function addBox(set, tpl, p, km, z0, z1){
     for(let x=x0;x<=x1;x++) for(let y=y0;y<=y1;y++) set.set(z+'/'+x+'/'+y, z);
   }
 }
-function journeyTiles(a,b){
+function journeyTiles(a,b,path){
   const tj=lsGet(K.tj,null); if(!tj) return null;
   const tpl=tj.tiles[0], set=new Map(), maxz=Math.min(tj.maxzoom||14,14);
   // flight path: wide overview corridor, narrower corridor with towns
@@ -722,7 +767,7 @@ function journeyTiles(a,b){
   addBox(set,tpl,{lat:(a.lat+b.lat)/2,lon:(a.lon+b.lon)/2},half,0,6);
   for(let z=0;z<=2;z++) for(let x=0;x<2**z;x++) for(let y=0;y<2**z;y++) set.set(z+'/'+x+'/'+y,z);   // whole world, very coarse
   // Along the route: overview wide, then sharper coastlines and towns closer to the line
-  for(const p of gcPoints(a,b,20)){ addBox(set,tpl,p,250,0,6); addBox(set,tpl,p,150,7,8); addBox(set,tpl,p,50,9,9); }
+  for(const p of routePoints(a,b,path,20)){ addBox(set,tpl,p,250,0,6); addBox(set,tpl,p,150,7,8); addBox(set,tpl,p,50,9,9); }
   // departure and arrival: region around, streets close in
   for(const p of [a,b]){ addBox(set,tpl,p,35,0,12); addBox(set,tpl,p,10,13,maxz); }
   const urls=[], zs=[];
@@ -737,14 +782,16 @@ function journeyTiles(a,b){
 function planJourney(){
   const ok=J.from&&J.to;
   $('jEst').hidden=!ok;
-  if(!ok){ $('bSaveJourney').disabled=true; return; }
-  const plan=journeyTiles(J.from,J.to);
-  $('jDist').innerHTML=Math.round(hav(J.from,J.to)/1000).toLocaleString()+'<small>km</small>';
+  if(!ok){ $('bSaveJourney').disabled=true; routeNote(); return; }
+  const plan=journeyTiles(J.from,J.to,J.path);
+  $('jDist').innerHTML=Math.round(J.path?pathKm(J.path.pts):hav(J.from,J.to)/1000).toLocaleString()+'<small>km</small>';
+  routeNote();
   if(!plan){ $('jTiles').textContent='–'; $('jSize').textContent='–'; $('bSaveJourney').disabled=true; return; }
   $('jTiles').textContent=plan.tiles.toLocaleString(); $('jSize').textContent='≈ '+fmtMB(plan.bytes);
   $('bSaveJourney').disabled=!!saving||plan.urls.length>MAX_TILES*2;
 }
 function setPlace(which, place, quiet){
+  if(!samePlace(J[which],place)) J.path=null;
   J[which]=place; const inp=$(which==='from'?'jFrom':'jTo');
   inp.value=place?(place.code?place.code+' · ':'')+place.name:''; inp.classList.toggle('set',!!place);
   $(which==='from'?'rFrom':'rTo').hidden=true; planJourney();
@@ -758,8 +805,8 @@ function rememberPlace(p){
   if(p.name==='My position') return;
   const list=lsGet(RK.places,[]).filter(x=>!samePlace(x,p)); list.unshift(p); lsSet(RK.places,list.slice(0,8));
 }
-function rememberJourney(a,b,flightNo){
-  const list=lsGet(RK.journeys,[]).filter(j=>!(samePlace(j.from,a)&&samePlace(j.to,b))); list.unshift({from:a,to:b,flight:flightNo||null}); lsSet(RK.journeys,list.slice(0,6));
+function rememberJourney(a,b,flightNo,path){
+  const list=lsGet(RK.journeys,[]).filter(j=>!(samePlace(j.from,a)&&samePlace(j.to,b))); list.unshift({from:a,to:b,flight:flightNo||null,path:path||null}); lsSet(RK.journeys,list.slice(0,6));
   renderRecentJourneys();
 }
 function renderRecentJourneys(){
@@ -768,7 +815,7 @@ function renderRecentJourneys(){
   for(const j of list){
     const b=document.createElement('button');
     b.textContent=(j.flight?j.flight+' · ':'')+(j.from.code||j.from.name)+' → '+(j.to.code||j.to.name);
-    b.onclick=()=>{ setPlace('from',j.from,true); setPlace('to',j.to,true); if(j.flight) $('jFlight').value=j.flight; };
+    b.onclick=()=>{ setPlace('from',j.from,true); setPlace('to',j.to,true); if(j.flight) $('jFlight').value=j.flight; if(j.path){ J.path=j.path; planJourney(); } };
     box.appendChild(b);
   }
 }
@@ -784,7 +831,7 @@ async function loadAirports(){
   return airports;
 }
 const fold = q => q.normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase();
-function airportPlace(a){ return {name:a.city||a.name, code:a.iata, airport:a.name, lat:a.lat, lon:a.lon, elev:a.ft!=null?Math.round(a.ft*0.3048):null}; }
+function airportPlace(a){ return {name:a.city||a.name, code:a.iata, icao:a.icao, airport:a.name, lat:a.lat, lon:a.lon, elev:a.ft!=null?Math.round(a.ft*0.3048):null}; }
 function findAirports(q){
   if(!airports) return [];
   const Q=q.trim().toUpperCase(), f=fold(q.trim()), out=[];
@@ -842,8 +889,125 @@ function wireSearch(which){
 wireSearch('from'); wireSearch('to');
 $('bFromHere').onclick=()=>{ if(!last){ toast('No position fix yet.'); return; } setPlace('from',{name:'My position',lat:+last.lat.toFixed(5),lon:+last.lon.toFixed(5),elev:last.ele!=null?Math.round(last.ele):null}); };
 
+/* ---- real flight paths: a recent flight's track from OpenSky Network, or a track file ---- */
+const OSKY='https://opensky-network.org/api';
+function routeNote(){
+  const box=$('jRoute'), m=$('jRouteMsg'), ok=J.from&&J.to;
+  $('bRealRoute').disabled=!ok||routeBusy;
+  $('bClearRoute').hidden=!J.path;
+  if(routeBusy) return;
+  m.classList.remove('err');
+  if(J.path){
+    const direct=ok?Math.round(hav(J.from,J.to)/1000):null;
+    m.textContent='Route: '+J.path.label+'.'+(direct?' '+Math.round(pathKm(J.path.pts)).toLocaleString()+' km flown, against '+direct.toLocaleString()+' km in a straight line.':'');
+  } else m.textContent=ok?'Route: direct line between the airports. Real flights usually follow a different path.':'Pick where you leave from and where you arrive, or import a track file.';
+}
+var routeBusy=false;
+function routeSay(t,err){ const m=$('jRouteMsg'); m.textContent=t; m.classList.toggle('err',!!err); }
+async function icaoOf(p){
+  if(!p) return null;
+  if(p.icao) return p.icao;
+  if(!p.code) return null;
+  await loadAirports();
+  return airports.find(a=>a.iata===p.code||a.icao===p.code)?.icao||null;
+}
+async function findRealRoute(){
+  if(!J.from||!J.to||routeBusy) return;
+  const from=J.from, to=J.to, want=flightIcao, wantNo=flightNo;
+  const [A,B]=await Promise.all([icaoOf(from),icaoOf(to)]);
+  if(!A||!B){ routeSay('A real flight path needs an airport at each end. You can import a track file instead.',true); return; }
+  if(!navigator.onLine){ routeSay('Finding a real flight path needs a connection. The direct line is shown for now.',true); return; }
+  routeBusy=true; routeNote();
+  routeSay('Looking for a recent '+(wantNo?wantNo+' ':'')+'flight from '+(from.code||A)+' to '+(to.code||B)+'…');
+  const day=86400, today=Math.floor(Date.now()/1000/day)*day;
+  const get=async url=>{
+    const r=await fetch(url);
+    if(r.status===404) return null;                     // nothing in that window
+    if(r.status===429) throw new Error('limit');
+    if(r.status===401||r.status===403) throw new Error('refused');
+    if(!r.ok) throw new Error('server');
+    return r.json();
+  };
+  try{
+    let best=null;
+    // Departures from the origin, one day at a time, newest first (OpenSky's data runs to the end of yesterday)
+    for(let k=1;k<=4;k++){
+      const list=await get(OSKY+'/flights/departure?airport='+A+'&begin='+(today-k*day)+'&end='+(today-(k-1)*day))||[];
+      for(const f of list){
+        if(f.estArrivalAirport!==B || !f.icao24) continue;
+        const exact=!!want && (f.callsign||'').trim().toUpperCase()===want.toUpperCase();
+        if(!best || (exact&&!best.exact) || (exact===best.exact && f.lastSeen>best.f.lastSeen)) best={f,exact};
+      }
+      if(best && (best.exact || !want)) break;
+    }
+    if(!best){ routeSay('No recent flights from '+(from.code||A)+' to '+(to.code||B)+' were found on OpenSky. The direct line is shown; you can import a track file instead.',true); return; }
+    const tr=await get(OSKY+'/tracks/all?icao24='+best.f.icao24+'&time='+best.f.firstSeen);
+    const raw=(tr&&tr.path||[]).map(w=>({lat:w[1],lon:w[2]}));
+    const pts=cleanPath(raw,from,to);
+    if(!pts||raw.length<5){ routeSay('OpenSky found a recent flight but no usable track for it. The direct line is shown.',true); return; }
+    if(J.from!==from||J.to!==to) return;                // the journey changed while we were looking
+    const when=new Date(best.f.firstSeen*1000).toLocaleDateString(undefined,{day:'numeric',month:'short'});
+    const cs=(best.f.callsign||'').trim();
+    J.path={pts, src:'opensky', label:(best.exact?(wantNo||cs):cs?cs+' (same route)':'a flight on the same route')+' as flown on '+when+', from OpenSky Network'};
+    toast('Real flight path found.');
+  }catch(e){
+    routeSay(e.message==='limit' ? 'OpenSky’s free daily limit has been reached. Try again tomorrow, or import a track file.'
+           : e.message==='refused' ? 'OpenSky refused the request. The direct line is shown; you can import a track file instead.'
+           : e.message==='server' ? 'OpenSky had a problem answering. Try again later, or import a track file.'
+           : 'Couldn’t reach OpenSky from this browser. The direct line is shown; you can import a track file instead.', true);
+    return;
+  }finally{ routeBusy=false; if(!$('jRouteMsg').classList.contains('err')) planJourney(); else { $('bRealRoute').disabled=!(J.from&&J.to); $('bClearRoute').hidden=!J.path; } }
+}
+$('bRealRoute').onclick=findRealRoute;
+$('bClearRoute').onclick=()=>{ J.path=null; planJourney(); };
+
+// Track files: GPX, KML (FlightAware, Flightradar24, Google Earth) or CSV with positions
+function splitCSV(line){ const out=[]; let cur='', q=false; for(const ch of line){ if(ch==='"'){ q=!q; } else if(ch===','&&!q){ out.push(cur); cur=''; } else cur+=ch; } out.push(cur); return out.map(x=>x.trim()); }
+function parseTrackFile(text){
+  const t=text.replace(/^﻿/,'').trim(), pts=[];
+  if(t.startsWith('<')){
+    const doc=new DOMParser().parseFromString(t,'application/xml');
+    const tags=n=>[...doc.getElementsByTagNameNS('*',n)];
+    for(const n of [...tags('trkpt'),...tags('rtept')]) pts.push({lat:+n.getAttribute('lat'),lon:+n.getAttribute('lon')});
+    if(!pts.length) for(const n of tags('coord')){ const [lo,la]=n.textContent.trim().split(/\s+/).map(Number); pts.push({lat:la,lon:lo}); }
+    const coords=sel=>{ for(const n of sel){ const c=n.getElementsByTagNameNS('*','coordinates')[0]; if(c) for(const tup of c.textContent.trim().split(/\s+/)){ const [lo,la]=tup.split(',').map(Number); pts.push({lat:la,lon:lo}); } } };
+    if(!pts.length){ const ls=tags('LineString'); ls.sort((a,b)=>b.textContent.length-a.textContent.length); coords(ls.slice(0,1)); }
+    if(!pts.length) coords(tags('Point'));
+  } else {
+    const lines=t.split(/\r?\n/).filter(l=>l.trim()); if(lines.length<3) return [];
+    const head=splitCSV(lines[0]).map(h=>h.toLowerCase());
+    const iLat=head.findIndex(h=>h==='lat'||h==='latitude'), iLon=head.findIndex(h=>h==='lon'||h==='lng'||h==='long'||h==='longitude'), iPos=head.findIndex(h=>h==='position');
+    for(const l of lines.slice(1)){
+      const c=splitCSV(l);
+      if(iLat>=0&&iLon>=0) pts.push({lat:parseFloat(c[iLat]),lon:parseFloat(c[iLon])});
+      else if(iPos>=0){ const [la,lo]=(c[iPos]||'').split(',').map(parseFloat); pts.push({lat:la,lon:lo}); }
+    }
+  }
+  return pts.filter(p=>isFinite(p.lat)&&isFinite(p.lon)&&Math.abs(p.lat)<=90&&Math.abs(p.lon)<=180&&!(p.lat===0&&p.lon===0));
+}
+async function nearestAirport(p){
+  await loadAirports(); let best=null, bd=60000;
+  for(const a of airports){ if(Math.abs(a.lat-p.lat)>1||Math.abs(a.lon-p.lon)>1.5) continue; const d=hav(p,a); if(d<bd){ bd=d; best=a; } }
+  return best?airportPlace(best):null;
+}
+$('fRoute').onchange=async e=>{
+  const f=e.target.files[0]; e.target.value=''; if(!f) return;
+  let raw;
+  try{ raw=parseTrackFile(await f.text()); }catch(err){ raw=[]; }
+  if(raw.length<2){ routeSay('No track found in '+f.name+'. Use a GPX, KML or CSV file of a past flight.',true); return; }
+  if(!J.from||!J.to){
+    const a=raw[0], b=raw[raw.length-1];
+    setPlace('from', await nearestAirport(a) || {name:'Track start', lat:+a.lat.toFixed(5), lon:+a.lon.toFixed(5)}, true);
+    setPlace('to', await nearestAirport(b) || {name:'Track end', lat:+b.lat.toFixed(5), lon:+b.lon.toFixed(5)}, true);
+  }
+  const pts=cleanPath(raw,J.from,J.to);
+  if(!pts){ routeSay('No track found in '+f.name+'.',true); return; }
+  J.path={pts, src:'file', label:'from your file '+f.name.replace(/\.[^.]+$/,'')};
+  planJourney(); toast('Track imported as the planned route.');
+};
+
 /* ---- flight number lookup (adsbdb.com, free, needs a connection) ---- */
-let flightNo=null;
+let flightNo=null, flightIcao=null;
 async function findFlight(){
   const raw=$('jFlight').value.toUpperCase().replace(/[^A-Z0-9]/g,''), m=$('jFlightMsg');
   const say=(t,err)=>{ m.textContent=t; m.hidden=false; m.classList.toggle('err',!!err); };
@@ -856,28 +1020,28 @@ async function findFlight(){
     if(!r.ok) throw new Error(r.status);
     const fr=(await r.json())?.response?.flightroute;
     if(!fr?.origin||!fr?.destination) throw new Error('no route');
-    const ap=x=>({name:x.municipality||x.name, code:x.iata_code||x.icao_code, airport:x.name, lat:x.latitude, lon:x.longitude, elev:x.elevation!=null?Math.round(x.elevation*0.3048):null});
-    flightNo=fr.callsign_iata||raw;
-    setPlace('from',ap(fr.origin)); setPlace('to',ap(fr.destination));
+    const ap=x=>({name:x.municipality||x.name, code:x.iata_code||x.icao_code, icao:x.icao_code||null, airport:x.name, lat:x.latitude, lon:x.longitude, elev:x.elevation!=null?Math.round(x.elevation*0.3048):null});
+    flightNo=fr.callsign_iata||raw; const callIcao=fr.callsign_icao||null;
+    setPlace('from',ap(fr.origin)); setPlace('to',ap(fr.destination)); flightIcao=callIcao;
     say((fr.airline?.name?fr.airline.name+' ':'')+flightNo+': '+fr.origin.name+' → '+fr.destination.name+'. Check this matches your booking; routes can change.');
+    findRealRoute();
   }catch(e){ say('Flight lookup failed. Check your connection, or enter the airports below.',true); }
 }
 $('bFlight').onclick=findFlight;
 $('jFlight').addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); findFlight(); } });
-$('jFlight').addEventListener('input',()=>{ flightNo=null; });
+$('jFlight').addEventListener('input',()=>{ flightNo=null; flightIcao=null; });
 
 $('bSaveJourney').onclick=async()=>{
   if(!J.from||!J.to) return;
-  const plan=journeyTiles(J.from,J.to); if(!plan) return;
+  const plan=journeyTiles(J.from,J.to,J.path); if(!plan) return;
   const res=await downloadTiles(plan.urls,'Saving '+J.from.name+' → '+J.to.name);
   if(!res||(res.cancelled&&!res.saved)) return;
   const areas=lsGet(K.areas,[]).filter(a=>!(a.journey&&samePlace(a.from,J.from)&&samePlace(a.to,J.to)));
-  const lats=[J.from.lat,J.to.lat], lons=[J.from.lon,J.to.lon];
-  areas.unshift({journey:true, name:J.from.name+' → '+J.to.name, from:J.from, to:J.to, date:Date.now(), tiles:plan.tiles, saved:res.saved, total:res.total,
-    b:[Math.min(...lons),Math.min(...lats),Math.max(...lons),Math.max(...lats)]});
+  areas.unshift({journey:true, name:J.from.name+' → '+J.to.name, from:J.from, to:J.to, path:J.path||null, date:Date.now(), tiles:plan.tiles, saved:res.saved, total:res.total,
+    b:pathBounds(J.from,J.to,J.path)});
   lsSet(K.areas,areas);
-  showJourney({from:J.from,to:J.to});
-  rememberJourney(J.from,J.to,flightNo);
+  showJourney({from:J.from,to:J.to,path:J.path||null});
+  rememberJourney(J.from,J.to,flightNo,J.path);
   renderAreas();
   if(!res.failed) toast('Journey maps saved. The route is on the map.');
 };
@@ -888,7 +1052,7 @@ function drawJourney(){
   if(!mapReady) return;
   const src=map.getSource('route'); if(!src) return;
   if(!journey){ src.setData(empty); return; }
-  const pts=gcPoints(journey.from,journey.to,20);
+  const pts=journey.path&&journey.path.pts&&journey.path.pts.length>1 ? journey.path.pts : gcPoints(journey.from,journey.to,20);
   src.setData({type:'FeatureCollection',features:[
     {type:'Feature',properties:{},geometry:{type:'LineString',coordinates:pts.map(p=>[p.lon,p.lat])}},
     {type:'Feature',properties:{end:1},geometry:{type:'Point',coordinates:[journey.from.lon,journey.from.lat]}},
@@ -908,7 +1072,7 @@ function renderAreas(){
     const s=document.createElement('span'); s.textContent=(a.journey?'Journey':a.name)+' · '+new Date(a.date).toLocaleDateString(undefined,{day:'numeric',month:'short',year:'numeric'}); t.appendChild(document.createElement('br')); t.appendChild(s);
     const go=document.createElement('button'); go.textContent='Go to';
     go.textContent=a.journey?'Show route':'Go to';
-    go.onclick=()=>{ if(a.journey) showJourney({from:a.from,to:a.to}); setFollow(false); $('pOffline').hidden=true; map?.fitBounds([[a.b[0],a.b[1]],[a.b[2],a.b[3]]],{padding:{top:90,bottom:(parseInt(getComputedStyle(document.documentElement).getPropertyValue('--dock-h'))||200)+40,left:40,right:40},maxZoom:14}); };
+    go.onclick=()=>{ if(a.journey) showJourney({from:a.from,to:a.to,path:a.path||null}); setFollow(false); $('pOffline').hidden=true; map?.fitBounds([[a.b[0],a.b[1]],[a.b[2],a.b[3]]],{padding:{top:90,bottom:(parseInt(getComputedStyle(document.documentElement).getPropertyValue('--dock-h'))||200)+40,left:40,right:40},maxZoom:14}); };
     li.append(t,go);
     if(a.journey && a.total && a.saved<a.total){
       const fin=document.createElement('button'); fin.textContent='Finish saving';

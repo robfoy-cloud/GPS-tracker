@@ -62,7 +62,7 @@
   </div>
 
   <h3>Plan a journey</h3>
-  <p>Saves street maps around where you leave and arrive, and an overview map along the flight path.</p>
+  <p>Saves street maps around where you leave and arrive, and an overview map along the flight path. Real flights rarely fly the direct line, so if you can, use a real flight path: one a recent flight on the same route actually flew.</p>
   <div class="recent" id="jRecent" hidden>
     <div class="lbl">Recent journeys</div>
     <div class="chips" id="jRecentList"></div>
@@ -87,6 +87,14 @@
     <div><div class="lbl">Route</div><div class="val" id="jDist">–</div></div>
     <div><div class="lbl">Tiles</div><div class="val" id="jTiles">–</div></div>
     <div><div class="lbl">Approx. size</div><div class="val" id="jSize">–</div></div>
+  </div>
+  <div class="route" id="jRoute">
+    <p class="hint" id="jRouteMsg">Pick where you leave from and where you arrive, or import a track file.</p>
+    <div class="row">
+      <button id="bRealRoute" disabled>Use a real flight path</button>
+      <label class="btn" for="fRoute">Import track file<input type="file" id="fRoute" accept=".gpx,.kml,.csv,application/gpx+xml,application/vnd.google-earth.kml+xml,text/csv,text/xml,application/xml"></label>
+      <button id="bClearRoute" hidden>Use direct line</button>
+    </div>
   </div>
   <div class="row"><button class="primary" id="bSaveJourney" disabled>Save journey maps</button></div>
   <p class="hint" id="oResult" hidden></p>
@@ -116,7 +124,7 @@
   <ul class="areas" id="areas"></ul>
   <div class="row"><button class="danger" id="bClear">Delete all offline maps</button></div>
   <div class="row"><button id="bAbout">About &amp; install</button></div>
-  <p class="ver">Flightroute version 19 · 1 Nov 2026</p>
+  <p class="ver">Flightroute version 20 · 2 Nov 2026</p>
 </section>
 
 <section class="sheet" id="pTracks" hidden aria-labelledby="hTr">
