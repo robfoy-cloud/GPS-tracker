@@ -283,7 +283,7 @@ setInterval(()=>{
 document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible') restartGPS(); });
 /* Precise Location off: iOS blurs the position to several km. Say how to fix it. */
 let coarseFixes = 0;
-let lastSave = 0, headFrom = null;
+let lastSave = 0, headFrom = null, recent = [];   // recent: last 3 minutes of good fixes
 function onPos(pos){
   const c = pos.coords;
   const p = {lat:c.latitude, lon:c.longitude, acc:c.accuracy, ele:c.altitude, spd:c.speed, t:pos.timestamp};
@@ -299,13 +299,16 @@ function onPos(pos){
   if(!headFrom || hav(headFrom,p) > Math.max(8, p.acc)) headFrom=p;
   if(p.spd==null||isNaN(p.spd)){ p.spd = prev ? (()=>{const dt=(p.t-prev.t)/1000;return dt>0?hav(prev,p)/dt:0;})() : null; }
 
+  { const lb=recent[recent.length-1];
+    if(p.acc<=50 && (!lb || hav(lb,p)>=3)) recent.push({lat:+p.lat.toFixed(7), lon:+p.lon.toFixed(7), ele:p.ele==null?null:+p.ele.toFixed(1), t:p.t});
+    while(recent.length && p.t-recent[0].t > 180000) recent.shift(); }
   if(rec && !paused){
     const lp = rec.pts[rec.pts.length-1];
     // In the air a fix through the cabin window is rougher, but ±250 m hardly matters at 800 km/h
     const maxAcc = flight.phase==='air' ? 250 : 50;
     if(p.acc<=maxAcc && (!lp || hav(lp,p) >= Math.max(3, Math.min(p.acc*0.4, 40)))){
       rec.pts.push({lat:+p.lat.toFixed(7), lon:+p.lon.toFixed(7), ele:p.ele==null?null:+p.ele.toFixed(1), t:p.t});
-      drawTrack();
+      drawTrack(); persistRec();
     }
   }
   if(map){
@@ -382,6 +385,7 @@ function simulateFlight(){
 function endSimulation(msg){
   if(!sim) return;
   clearInterval(sim.timer);
+  if(rec && rec.auto) stopRecording(false);
   flight=sim.saved||{phase:'ground'}; sim=null;
   groundAlt=null; slowSince=null; last=null; firstFix=true;
   $('simPill').hidden=true; showFlight(); setJetAnimation(false);
@@ -409,10 +413,19 @@ function flightCheck(p){
   }
   if(flight.phase !== 'air'){
     const climbed = groundAlt!=null && p.ele - groundAlt > AIR_ABOVE && spd > 25;
-    if(climbed || spd > 70){ flight = {phase:'air', takeoff: wall}; slowSince = null; saveFlight(); toast('Airborne: flight timer started.');
+    if(climbed || spd > 70){ flight = {phase:'air', takeoff: wall}; slowSince = null; saveFlight();
+      if(!rec && autoRecOn()){ startRecording(true, recent.slice()); toast('Airborne: flight timer started and recording your track.'); }
+      else toast('Airborne: flight timer started.');
       if(map && follow && map.getZoom() > 10) map.jumpTo({center:[p.lon,p.lat], zoom:8}); }
   } else {
-    if(spd < 20){ slowSince ??= gt; if(gt - slowSince > 30000){ flight = {phase:'landed', takeoff: flight.takeoff, landing: sim ? slowSince : wall - (gt - slowSince)}; saveFlight(); groundAlt = p.ele; groundAt = gt; toast('Landed. Flight time '+fmtT((flight.landing-flight.takeoff)/1000)+'.'); } }
+    if(spd < 20){ slowSince ??= gt; if(gt - slowSince > 30000){ flight = {phase:'landed', takeoff: flight.takeoff, landing: sim ? slowSince : wall - (gt - slowSince)}; saveFlight(); groundAlt = p.ele; groundAt = gt;
+      let msg='Landed. Flight time '+fmtT((flight.landing-flight.takeoff)/1000)+'.';
+      if(rec && rec.auto){
+        const j=journey, nm=(j&&j.from&&j.to ? (j.from.code||j.from.name)+' → '+(j.to.code||j.to.name) : 'Flight')+(sim?' (simulated)':'');
+        const t=stopRecording(true, nm);
+        if(t) msg+=' Track saved: '+(trackStats(t.pts).d/1000).toFixed(0)+' km.';
+      }
+      toast(msg); } }
     else slowSince = null;
   }
   showFlight();
@@ -435,26 +448,52 @@ function setRecButtons(){
   $('bStop').hidden = !rec;
   $('recPill').hidden = !rec; $('recText').textContent = paused ? 'Paused' : 'Recording';
 }
-$('bRec').onclick = () => {
-  if(!rec){
-    rec = {pts:[], startedAt:Date.now(), pausedMs:0}; paused=false;
-    lockScreen(); setFollow(true);
-  } else if(!paused){ paused = Date.now(); }
-  else { rec.pausedMs += Date.now()-paused; paused=false; }
+const autoRecOn = () => lsGet('fieldline.autoRec', true) !== false;
+const REC_KEY='fieldline.rec';
+function startRecording(auto, pts){
+  rec = {pts:pts||[], startedAt:Date.now(), pausedMs:0, auto:!!auto}; paused=false;
+  lockScreen(); setFollow(true); persistRec(true);
   setRecButtons(); readouts(); drawTrack();
-};
-$('bStop').onclick = () => {
+}
+function stopRecording(save, name){
   const r = rec; rec=null; paused=false;
+  try{ lsSet(REC_KEY,null); }catch(e){}
   try{ wake?.release(); }catch(e){} wake=null;
-  if(r && r.pts.length>1){
+  if(save && r && r.pts.length>1){
     const d=new Date(r.startedAt);
-    const t={id:'t'+r.startedAt, name:'Track '+d.toLocaleDateString(undefined,{day:'numeric',month:'short'})+' '+d.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'}), pts:r.pts};
+    const when=d.toLocaleDateString(undefined,{day:'numeric',month:'short'})+' '+d.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'});
+    const t={id:'t'+r.startedAt, name:(name||'Track')+' · '+when, pts:r.pts, auto:r.auto||undefined};
     tracks.unshift(t);
-    if(!lsSet(K.tracks,tracks)) toast('Phone storage is full; export this track as GPX.'); else toast('Saved '+t.name);
+    if(!lsSet(K.tracks,tracks)) toast('Phone storage is full; export this track as GPX.');
     shown=t; drawSaved(); renderTracks();
-  } else if(r) toast('Too few points to save.');
+    setRecButtons(); readouts(); drawTrack();
+    return t;
+  }
+  if(save && r) toast('Too few points to save.');
+  setRecButtons(); readouts(); drawTrack();
+  return null;
+}
+// Keep the recording in progress on the phone, so a reload or app update mid-flight doesn't lose it
+let recSavedAt=0;
+function persistRec(force){
+  if(!rec || sim) return;
+  if(!force && Date.now()-recSavedAt<15000) return;
+  recSavedAt=Date.now(); lsSet(REC_KEY,{rec, paused});
+}
+document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='hidden') persistRec(true); });
+addEventListener('pagehide',()=>persistRec(true));
+{ const saved=lsGet(REC_KEY,null);
+  if(saved && saved.rec && Array.isArray(saved.rec.pts)){ rec=saved.rec; paused=saved.paused||false; setTimeout(()=>{ setRecButtons(); drawTrack(); readouts(); toast('Recording resumed.'); },800); } }
+
+$('bRec').onclick = () => {
+  if(!rec) startRecording(false);
+  else if(!paused){ paused = Date.now(); persistRec(true); }
+  else { rec.pausedMs += Date.now()-paused; paused=false; persistRec(true); }
   setRecButtons(); readouts(); drawTrack();
 };
+$('bStop').onclick = () => { const t=stopRecording(true); if(t) toast('Saved '+t.name); };
+$('tAutoRec').checked = autoRecOn();
+$('tAutoRec').onchange = e => { lsSet('fieldline.autoRec', e.target.checked); toast(e.target.checked ? 'Flights will be recorded automatically.' : 'Automatic flight recording off.'); };
 
 /* ---------------- sheets ---------------- */
 function openSheet(id){ document.querySelectorAll('.sheet').forEach(s=>s.hidden = s.id!==id); if(id==='pOffline'){estimate();renderAreas();planJourney();} if(id==='pTracks') renderTracks(); }
@@ -993,6 +1032,9 @@ $('wInstall').onclick = async () => {
 const closeInstall = () => { $('installSheet').hidden = true; };
 $('isClose').onclick = closeInstall; $('isDone').onclick = closeInstall;
 $('installSheet').addEventListener('click', e => { if(e.target === $('installSheet')) closeInstall(); });
+
+// Read-only handle for troubleshooting from the browser console
+window.fieldlineDebug = { get rec(){return rec;}, get flight(){return flight;}, get sim(){return !!sim;}, get tracks(){return tracks;}, trackStats, persistRec:()=>persistRec(true) };
 
 initMap();
 if(!standalone && !lsGet('fieldline.web', false)) showWelcome(); else startGPSOnce();

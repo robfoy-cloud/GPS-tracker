@@ -116,11 +116,16 @@
   <ul class="areas" id="areas"></ul>
   <div class="row"><button class="danger" id="bClear">Delete all offline maps</button></div>
   <div class="row"><button id="bAbout">About &amp; install</button></div>
-  <p class="ver">Flightroute version 19 · 1 Nov 2026</p>
+  <p class="ver">Flightroute version 20 · 2 Nov 2026</p>
 </section>
 
 <section class="sheet" id="pTracks" hidden aria-labelledby="hTr">
   <div class="sheet-head"><h2 id="hTr">Tracks</h2><button class="x" data-close aria-label="Close">✕</button></div>
+  <label class="switch" for="tAutoRec">
+    <input type="checkbox" id="tAutoRec" checked>
+    <span class="track" aria-hidden="true"></span>
+    <span><b>Record flights automatically</b>Starts recording at takeoff, including the takeoff run, and saves the track when you land. Keep Flightroute on screen during the flight.</span>
+  </label>
   <div class="row">
     <label class="btn" for="fImp">Import GPX<input type="file" id="fImp" accept=".gpx,application/gpx+xml,text/xml"></label>
     <button id="bHide" hidden>Hide track from map</button>

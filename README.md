@@ -13,7 +13,9 @@ Flightroute is a web app that shows your position on a map and keeps working wit
 - Zooming in past the saved detail shows the coarser saved map instead of a blank screen
 - **Flight timer**: starts automatically once you are 50 m above the ground and moving fast, and stops 30 seconds after you slow down on landing
 - **GPS signal** bars and accuracy in the top bar, with a warning when fixes stop arriving; an Offline pill when there is no connection
-- Records tracks (record, pause, stop), shows speed, distance, time and altitude, and lists saved tracks
+- **Records flights automatically** (switch in Tracks, on by default): starts at takeoff, including the last 3 minutes on the ground, and saves the track at landing, named after the journey
+- Records tracks by hand too (record, pause, stop); a recording in progress is kept on the phone, so it resumes after a reload or app update
+- Shows speed, distance, time and altitude, and lists saved tracks
 - Exports tracks as GPX (share sheet on iPhone) and imports GPX files
 - Installs to the home screen and opens offline. Opening the site in a browser shows a store-style welcome page with **Install** (the browser's own install prompt on Android and desktop Chrome; a three-step guide on iPhone, iPad and Mac Safari, which don't allow one-tap install) and **Web version**
 
