@@ -726,6 +726,7 @@ $('bDiag').onclick=async()=>{
   }catch(e){ lines.push('Cache error: '+e.name+' '+e.message); }
   for(const a of lsGet(K.areas,[])) lines.push('Saved: '+(a.journey?'journey '+a.name:'area '+(a.detail||''))+' | '+(a.total?a.saved+'/'+a.total:a.tiles+' planned')+' | '+new Date(a.date).toISOString());
   lines.push('Last save result: '+($('oResult').textContent||'none this session'));
+  lines.push('Last route lookup error: '+lastRouteError);
   lines.push('All map errors by kind: '+JSON.stringify(window.__mapErrTally||{}));
   lines.push('Recent map errors: '+(window.__mapErrors||[]).slice(-5).join(' || '));
   out.value=lines.join('\n');
@@ -796,11 +797,17 @@ async function opensky(path, params){
     if(r.ok) return await r.json();
     if(r.status!==429 && r.status!==403 && r.status!==401) throw new Error('OpenSky '+r.status);
   }catch(e){ /* fall through to the helper */ }
-  const r=await fetch('/api/opensky?path='+encodeURIComponent(path)+'&'+qs);
-  if(!r.ok) throw new Error(r.status===429?'busy':'unavailable');
+  let r;
+  try{ r=await fetch('/api/opensky?path='+encodeURIComponent(path)+'&'+qs); }
+  catch(e){ throw new Error('no connection to this site\'s helper'); }
+  if(r.status===429) throw new Error('busy');
+  if(!r.ok){
+    let d=''; try{ const j=await r.json(); d=[j.error,j.detail].filter(Boolean).join(': '); }catch(e){ d='helper answered '+r.status; }
+    throw new Error(d||('helper answered '+r.status));
+  }
   return r.json();
 }
-let routeJob=0;
+let routeJob=0, lastRouteError='none';
 async function findFlownRoute(){
   const job=++routeJob, from=J.from, to=J.to, el=$('jRoute');
   routeInfo=null; $('bStraight').hidden=true;
@@ -814,9 +821,10 @@ async function findFlownRoute(){
   try{
     const day=86400, now=Math.floor(Date.now()/1000), today=now-now%day;
     let best=null, sameCallsign=false;
-    // Search back up to 6 days, two days at a time, for flights from dep to arr (same flight number first)
-    for(let w=0; w<3 && !sameCallsign; w++){
-      const end=today-w*2*day, begin=end-2*day;
+    // Search back day by day (OpenSky won't search across more than two calendar days) for up to 7 days,
+    // for flights from dep to arr: the same flight number first, else the most recent
+    for(let w=0; w<7 && !sameCallsign && !(best && w>=3); w++){
+      const begin=today-w*day, end=Math.min(begin+day-1, now);
       const list=await opensky('flights/departure',{airport:dep, begin, end});
       if(job!==routeJob) return;
       for(const f of (Array.isArray(list)?list:[])){
@@ -839,7 +847,8 @@ async function findFlownRoute(){
     $('bStraight').hidden=false;
     planJourney(); previewRoute();
   }catch(e){
-    if(job===routeJob) el.textContent=e.message==='busy'?'Route: shortest path. The flight-tracking service is busy; try again later.':'Route: shortest path. The flight-tracking service could not be reached.';
+    lastRouteError=e.message;
+    if(job===routeJob) el.textContent=e.message==='busy'?'Route: shortest path. The flight-tracking service is busy; try again later.':'Route: shortest path. The flight-tracking service could not be reached ('+e.message+').';
   }
 }
 $('bStraight').onclick=()=>{ routeJob++; routeInfo=null; $('jRoute').textContent='Route: shortest path.'; $('bStraight').hidden=true; planJourney(); previewRoute(); };

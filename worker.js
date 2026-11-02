@@ -49,7 +49,10 @@ async function opensky(request, env, ctx) {
   try { r = await fetch(upstream, { headers }); }
   catch (e) { return json({ error: 'OpenSky could not be reached' }, 502); }
   if (r.status === 404) return json('[]', 200, { 'cache-control': 'public, max-age=1800' });   // OpenSky: nothing found
-  if (!r.ok) return json({ error: 'OpenSky answered ' + r.status, retryAfter: r.headers.get('x-rate-limit-retry-after-seconds') }, r.status === 429 ? 429 : 502);
+  if (!r.ok) {
+    const detail = (await r.text().catch(() => '')).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 160);
+    return json({ error: 'OpenSky answered ' + r.status + (t ? '' : ' (anonymous)'), detail, retryAfter: r.headers.get('x-rate-limit-retry-after-seconds') }, r.status === 429 ? 429 : 502);
+  }
   // Past flights don't change: keep tracks a day, flight lists an hour
   const res = json(await r.text(), 200, { 'cache-control': 'public, max-age=' + (path === 'tracks/all' ? 86400 : 3600) });
   ctx.waitUntil(cache.put(key, res.clone()));
