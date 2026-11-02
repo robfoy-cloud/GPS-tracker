@@ -8,6 +8,7 @@ Flightroute is a web app that shows your position on a map and keeps working wit
 
 - Shows your live position on an OpenStreetMap-based map as a navigation arrow on the ground and, once airborne, an animated jet with flickering engines and vapour trails; both turn to face your direction of travel
 - **Simulate a flight** (Offline map panel): plays a whole flight along the planned journey in about a minute, to test the timer, the jet and landing detection before flying
+- **Route actually flown**: once both airports are chosen, the planner looks up a recent flight between them on the [OpenSky Network](https://opensky-network.org) (your flight number first, else the latest flight on that route in the last 6 days), draws the path it flew, saves maps along it and shows distance to go along it; the simulator flies it too. Falls back to the shortest path when nothing is found
 - **Plan a journey**: enter a flight number (looked up on [adsbdb](https://www.adsbdb.com)) or pick airports from the built-in list of 3,200 airports (works offline) or any place; recent journeys and places are remembered; it saves street maps around both ends and an overview map along the great-circle route, draws the route, and shows the distance still to go
 - **Save the area on screen** at Overview (flights, a continent), Region or Street detail
 - Zooming in past the saved detail shows the coarser saved map instead of a blank screen
@@ -38,6 +39,7 @@ Limits: iOS stops web apps from reading GPS while the screen is locked or anothe
 | `app.css` | Styles |
 | `app.js` | Map, GPS, recording, offline tiles, GPX |
 | `sw.js` | Service worker that keeps the app available offline |
+| `worker.js`, `wrangler.jsonc`, `.assetsignore` | Cloudflare Worker: serves the app's files and `/api/opensky`, a cached pass-through for route lookups. Optional secrets `OPENSKY_CLIENT_ID` / `OPENSKY_CLIENT_SECRET` raise OpenSky's daily limit |
 | `manifest.webmanifest`, `icons/` | Home screen install |
 | `screenshots/` | Welcome page and install screenshots |
 | `airports.json` | Airports with scheduled flights, from [OurAirports](https://ourairports.com/data/) (public domain) |
@@ -49,4 +51,4 @@ Map tiles come from [OpenFreeMap](https://openfreemap.org) (free, no key). Place
 
 ## Running locally
 
-`python3 -m http.server 8000` in this folder, then open `http://localhost:8000`. Location access needs HTTPS or `localhost`.
+`python3 -m http.server 8000` in this folder, then open `http://localhost:8000` (route lookups then go to OpenSky directly). To include the Worker, run `npx wrangler dev`. Location access needs HTTPS or `localhost`.

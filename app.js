@@ -341,7 +341,12 @@ function readouts(){
   const kmh = last&&last.spd!=null ? last.spd*3.6 : null;
   $('rSpd').innerHTML = (kmh==null ? '–' : kmh>=100 ? Math.round(kmh).toLocaleString() : kmh.toFixed(1))+'<small>km/h</small>';
   $('rAlt').innerHTML = (last&&last.ele!=null ? Math.round(last.ele).toLocaleString() : '–')+'<small>m</small>';
-  const togo = (journey&&last) ? '  ·  '+Math.round(hav(last,journey.to)/1000).toLocaleString()+' km to '+journey.to.name : '';
+  let togo='';
+  if(journey&&last){
+    let d=hav(last,journey.to);
+    if(journey.route){ const pts=journey.route.map(([lon,lat])=>({lat,lon})); let bi=0,bd=Infinity; pts.forEach((p,i)=>{const x=hav(last,p); if(x<bd){bd=x;bi=i;}}); d=bd+routeLength(pts.slice(bi)); }
+    togo='  ·  '+Math.round(d/1000).toLocaleString()+' km to '+journey.to.name;
+  }
   $('rPos').textContent = last ? dm(last.lat,'N','S')+'  '+dm(last.lon,'E','W')+(last.ele!=null?'  ·  '+Math.round(last.ele).toLocaleString()+' m / '+Math.round(last.ele*3.28084).toLocaleString()+' ft':'')+togo : 'Waiting for a position fix';
 }
 setInterval(()=>{ if(rec) readouts(); showFlight(); }, 1000);
@@ -358,7 +363,8 @@ function simulateFlight(){
     const la2=Math.asin(Math.sin(la)*Math.cos(d)+Math.cos(la)*Math.sin(d)*Math.cos(b));
     const lo2=lo+Math.atan2(Math.sin(b)*Math.sin(d)*Math.cos(la),Math.cos(d)-Math.sin(la)*Math.sin(la2));
     B={lat:la2*180/Math.PI, lon:lo2*180/Math.PI, name:'test destination'}; }
-  const g = A.elev ?? 60, path = gcPoints(A,B,5);
+  const useRoute = journey && journey.route && journey.from===A && journey.to===B ? journey.route : null;
+  const g = A.elev ?? 60, path = densify(routeLine(A,B,useRoute),5);
   // Flight profile: [steps, speed m/s from→to, altitude m from→to]; one step = 5 s of GPS time
   // [steps, seconds of flight per step, speed m/s from→to, altitude m from→to]: about an hour gate to gate
   const prof=[[8,15,6,6,g,g],[5,6,20,78,g,g],[25,25,85,230,g+60,11000],[50,50,230,230,11000,11000],[25,30,230,85,11000,g+250],[3,10,75,35,g+40,g],[12,5,10,6,g,g]];
@@ -752,7 +758,95 @@ function addBox(set, tpl, p, km, z0, z1){
     for(let x=x0;x<=x1;x++) for(let y=y0;y<=y1;y++) set.set(z+'/'+x+'/'+y, z);
   }
 }
-function journeyTiles(a,b){
+/* ---------------- the route actually flown (OpenSky Network) ---------------- */
+// A route is a list of [lon, lat] points. Without one, the great circle between the airports is used.
+const routeLine = (a,b,route) => route && route.length>1 ? route.map(([lon,lat])=>({lat,lon})) : gcPoints(a,b,20);
+function routeLength(pts){ let d=0; for(let i=1;i<pts.length;i++) d+=hav(pts[i-1],pts[i]); return d; }
+// Evenly spaced points every `km` along a route (for map corridors and the simulator)
+function densify(pts, km){
+  const out=[pts[0]];
+  for(let i=1;i<pts.length;i++){
+    const a=pts[i-1], b=pts[i], n=Math.max(1,Math.ceil(hav(a,b)/1000/km));
+    for(let k=1;k<=n;k++) out.push({lat:a.lat+(b.lat-a.lat)*k/n, lon:a.lon+(b.lon-a.lon)*k/n});
+  }
+  return out;
+}
+// Keep a point every ~15 km so a stored route stays small
+function thin(pts){
+  const out=[pts[0]];
+  for(const p of pts) if(hav(out[out.length-1],p)>15000) out.push(p);
+  out.push(pts[pts.length-1]);
+  return out;
+}
+let routeInfo=null;   // {route, label} for the journey being planned
+function icaoFor(place){
+  if(!place) return null;
+  if(place.icao) return place.icao;
+  if(!airports) return null;
+  if(place.code){ const a=airports.find(x=>x.iata===place.code); if(a) return a.icao; }
+  // a place that isn't an airport: the nearest airport within 40 km
+  let best=null, bd=40000; for(const a of airports){ const d=hav(place,a); if(d<bd){ bd=d; best=a; } } return best?.icao||null;
+}
+async function opensky(path, params){
+  const qs=new URLSearchParams(params).toString();
+  // The browser asks OpenSky itself first (its own daily allowance); if that's blocked, it asks this site's helper
+  try{
+    const r=await fetch('https://opensky-network.org/api/'+path+'?'+qs, {mode:'cors'});
+    if(r.status===404) return [];
+    if(r.ok) return await r.json();
+    if(r.status!==429 && r.status!==403 && r.status!==401) throw new Error('OpenSky '+r.status);
+  }catch(e){ /* fall through to the helper */ }
+  const r=await fetch('/api/opensky?path='+encodeURIComponent(path)+'&'+qs);
+  if(!r.ok) throw new Error(r.status===429?'busy':'unavailable');
+  return r.json();
+}
+let routeJob=0;
+async function findFlownRoute(){
+  const job=++routeJob, from=J.from, to=J.to, el=$('jRoute');
+  routeInfo=null; $('bStraight').hidden=true;
+  if(!from||!to){ el.hidden=true; return; }
+  el.hidden=false;
+  if(!navigator.onLine){ el.textContent='Route: shortest path. Connect to look up the route flights actually take.'; return; }
+  await loadAirports();
+  const dep=icaoFor(from), arr=icaoFor(to), cs=(flightCallsign||'').replace(/\s/g,'').toUpperCase();
+  if(!dep||!arr){ el.textContent='Route: shortest path (no airport found to look up).'; return; }
+  el.textContent='Looking up the route flown recently…';
+  try{
+    const day=86400, now=Math.floor(Date.now()/1000), today=now-now%day;
+    let best=null, sameCallsign=false;
+    // Search back up to 6 days, two days at a time, for flights from dep to arr (same flight number first)
+    for(let w=0; w<3 && !sameCallsign; w++){
+      const end=today-w*2*day, begin=end-2*day;
+      const list=await opensky('flights/departure',{airport:dep, begin, end});
+      if(job!==routeJob) return;
+      for(const f of (Array.isArray(list)?list:[])){
+        if(f.estArrivalAirport!==arr || !f.icao24 || !f.firstSeen || !f.lastSeen) continue;
+        const same = cs && (f.callsign||'').replace(/\s/g,'').toUpperCase()===cs;
+        if(!best || (same && !sameCallsign) || (same===sameCallsign && f.lastSeen>best.lastSeen)){ best=f; sameCallsign=same; }
+      }
+    }
+    if(!best){ el.textContent='Route: shortest path. No recent flights from '+dep+' to '+arr+' were found.'; return; }
+    const tr=await opensky('tracks/all',{icao24:best.icao24, time:Math.floor((best.firstSeen+best.lastSeen)/2)});
+    if(job!==routeJob) return;
+    let pts=(tr?.path||[]).filter(w=>w[1]!=null&&w[2]!=null).map(w=>({lat:w[1],lon:w[2]}));
+    if(pts.length<5){ el.textContent='Route: shortest path. The recent flight had too little tracking to use.'; return; }
+    pts=thin([from,...pts,to]);
+    const route=pts.map(p=>[+p.lon.toFixed(4),+p.lat.toFixed(4)]);
+    const when=new Date(best.firstSeen*1000).toLocaleDateString(undefined,{weekday:'short',day:'numeric',month:'short'});
+    const who=(best.callsign||'').trim()||'a flight';
+    routeInfo={route, label:(sameCallsign?'your flight ('+who+')':who)+' on '+when};
+    el.textContent='Route: as flown by '+routeInfo.label+', '+Math.round(routeLength(pts)/1000).toLocaleString()+' km. Your flight may differ a little.';
+    $('bStraight').hidden=false;
+    planJourney(); previewRoute();
+  }catch(e){
+    if(job===routeJob) el.textContent=e.message==='busy'?'Route: shortest path. The flight-tracking service is busy; try again later.':'Route: shortest path. The flight-tracking service could not be reached.';
+  }
+}
+$('bStraight').onclick=()=>{ routeJob++; routeInfo=null; $('jRoute').textContent='Route: shortest path.'; $('bStraight').hidden=true; planJourney(); previewRoute(); };
+// Show the planned route on the map while planning
+function previewRoute(){ if(J.from&&J.to) showJourney({from:J.from, to:J.to, route:routeInfo?.route||null, label:routeInfo?.label||null}, true); }
+
+function journeyTiles(a,b,route){
   const tj=lsGet(K.tj,null); if(!tj) return null;
   const tpl=tj.tiles[0], set=new Map(), maxz=Math.min(tj.maxzoom||14,14);
   // flight path: wide overview corridor, narrower corridor with towns
@@ -761,7 +855,7 @@ function journeyTiles(a,b){
   addBox(set,tpl,{lat:(a.lat+b.lat)/2,lon:(a.lon+b.lon)/2},half,0,6);
   for(let z=0;z<=2;z++) for(let x=0;x<2**z;x++) for(let y=0;y<2**z;y++) set.set(z+'/'+x+'/'+y,z);   // whole world, very coarse
   // Along the route: overview wide, then sharper coastlines and towns closer to the line
-  for(const p of gcPoints(a,b,20)){ addBox(set,tpl,p,250,0,6); addBox(set,tpl,p,150,7,8); addBox(set,tpl,p,50,9,9); }
+  for(const p of densify(routeLine(a,b,route),20)){ addBox(set,tpl,p,250,0,6); addBox(set,tpl,p,150,7,8); addBox(set,tpl,p,50,9,9); }
   // departure and arrival: region around, streets close in
   for(const p of [a,b]){ addBox(set,tpl,p,35,0,12); addBox(set,tpl,p,10,13,maxz); }
   const urls=[], zs=[];
@@ -777,8 +871,8 @@ function planJourney(){
   const ok=J.from&&J.to;
   $('jEst').hidden=!ok;
   if(!ok){ $('bSaveJourney').disabled=true; return; }
-  const plan=journeyTiles(J.from,J.to);
-  $('jDist').innerHTML=Math.round(hav(J.from,J.to)/1000).toLocaleString()+'<small>km</small>';
+  const plan=journeyTiles(J.from,J.to,routeInfo?.route);
+  $('jDist').innerHTML=Math.round(routeLength(routeLine(J.from,J.to,routeInfo?.route))/1000).toLocaleString()+'<small>km</small>';
   if(!plan){ $('jTiles').textContent='–'; $('jSize').textContent='–'; $('bSaveJourney').disabled=true; return; }
   $('jTiles').textContent=plan.tiles.toLocaleString(); $('jSize').textContent='≈ '+fmtMB(plan.bytes);
   $('bSaveJourney').disabled=!!saving||plan.urls.length>MAX_TILES*2;
@@ -788,6 +882,7 @@ function setPlace(which, place, quiet){
   inp.value=place?(place.code?place.code+' · ':'')+place.name:''; inp.classList.toggle('set',!!place);
   $(which==='from'?'rFrom':'rTo').hidden=true; planJourney();
   if(place && !quiet) rememberPlace(place);
+  clearTimeout(setPlace.t); setPlace.t=setTimeout(findFlownRoute,300);
 }
 
 /* ---- recent places and journeys ---- */
@@ -823,7 +918,7 @@ async function loadAirports(){
   return airports;
 }
 const fold = q => q.normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase();
-function airportPlace(a){ return {name:a.city||a.name, code:a.iata, airport:a.name, lat:a.lat, lon:a.lon, elev:a.ft!=null?Math.round(a.ft*0.3048):null}; }
+function airportPlace(a){ return {name:a.city||a.name, code:a.iata, icao:a.icao, airport:a.name, lat:a.lat, lon:a.lon, elev:a.ft!=null?Math.round(a.ft*0.3048):null}; }
 function findAirports(q){
   if(!airports) return [];
   const Q=q.trim().toUpperCase(), f=fold(q.trim()), out=[];
@@ -882,7 +977,7 @@ wireSearch('from'); wireSearch('to');
 $('bFromHere').onclick=()=>{ if(!last){ toast('No position fix yet.'); return; } setPlace('from',{name:'My position',lat:+last.lat.toFixed(5),lon:+last.lon.toFixed(5),elev:last.ele!=null?Math.round(last.ele):null}); };
 
 /* ---- flight number lookup (adsbdb.com, free, needs a connection) ---- */
-let flightNo=null;
+let flightNo=null, flightCallsign=null;
 async function findFlight(){
   const raw=$('jFlight').value.toUpperCase().replace(/[^A-Z0-9]/g,''), m=$('jFlightMsg');
   const say=(t,err)=>{ m.textContent=t; m.hidden=false; m.classList.toggle('err',!!err); };
@@ -895,41 +990,41 @@ async function findFlight(){
     if(!r.ok) throw new Error(r.status);
     const fr=(await r.json())?.response?.flightroute;
     if(!fr?.origin||!fr?.destination) throw new Error('no route');
-    const ap=x=>({name:x.municipality||x.name, code:x.iata_code||x.icao_code, airport:x.name, lat:x.latitude, lon:x.longitude, elev:x.elevation!=null?Math.round(x.elevation*0.3048):null});
-    flightNo=fr.callsign_iata||raw;
+    const ap=x=>({name:x.municipality||x.name, code:x.iata_code||x.icao_code, icao:x.icao_code, airport:x.name, lat:x.latitude, lon:x.longitude, elev:x.elevation!=null?Math.round(x.elevation*0.3048):null});
+    flightNo=fr.callsign_iata||raw; flightCallsign=fr.callsign_icao||fr.callsign||null;
     setPlace('from',ap(fr.origin)); setPlace('to',ap(fr.destination));
     say((fr.airline?.name?fr.airline.name+' ':'')+flightNo+': '+fr.origin.name+' → '+fr.destination.name+'. Check this matches your booking; routes can change.');
   }catch(e){ say('Flight lookup failed. Check your connection, or enter the airports below.',true); }
 }
 $('bFlight').onclick=findFlight;
 $('jFlight').addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); findFlight(); } });
-$('jFlight').addEventListener('input',()=>{ flightNo=null; });
+$('jFlight').addEventListener('input',()=>{ flightNo=null; flightCallsign=null; });
 
 $('bSaveJourney').onclick=async()=>{
   if(!J.from||!J.to) return;
-  const plan=journeyTiles(J.from,J.to); if(!plan) return;
+  const plan=journeyTiles(J.from,J.to,routeInfo?.route); if(!plan) return;
   const res=await downloadTiles(plan.urls,'Saving '+J.from.name+' → '+J.to.name);
   if(!res||(res.cancelled&&!res.saved)) return;
   const areas=lsGet(K.areas,[]).filter(a=>!(a.journey&&samePlace(a.from,J.from)&&samePlace(a.to,J.to)));
   const lats=[J.from.lat,J.to.lat], lons=[J.from.lon,J.to.lon];
-  areas.unshift({journey:true, name:J.from.name+' → '+J.to.name, from:J.from, to:J.to, date:Date.now(), tiles:plan.tiles, saved:res.saved, total:res.total,
+  areas.unshift({journey:true, name:J.from.name+' → '+J.to.name, from:J.from, to:J.to, route:routeInfo?.route||null, label:routeInfo?.label||null, date:Date.now(), tiles:plan.tiles, saved:res.saved, total:res.total,
     b:[Math.min(...lons),Math.min(...lats),Math.max(...lons),Math.max(...lats)]});
   lsSet(K.areas,areas);
-  showJourney({from:J.from,to:J.to});
+  showJourney({from:J.from,to:J.to,route:routeInfo?.route||null,label:routeInfo?.label||null});
   rememberJourney(J.from,J.to,flightNo);
   renderAreas();
   if(!res.failed) toast('Journey maps saved. The route is on the map.');
 };
-function showJourney(j){
-  journey=j; lsSet('fieldline.journey',j); drawJourney(); readouts();
+function showJourney(j, preview){
+  journey=j; if(!preview) lsSet('fieldline.journey',j); drawJourney(); readouts();
 }
 function drawJourney(){
   if(!mapReady) return;
   const src=map.getSource('route'); if(!src) return;
   if(!journey){ src.setData(empty); return; }
-  const pts=gcPoints(journey.from,journey.to,20);
+  const pts=routeLine(journey.from,journey.to,journey.route);
   src.setData({type:'FeatureCollection',features:[
-    {type:'Feature',properties:{},geometry:{type:'LineString',coordinates:pts.map(p=>[p.lon,p.lat])}},
+    {type:'Feature',properties:{flown:journey.route?1:0},geometry:{type:'LineString',coordinates:pts.map(p=>[p.lon,p.lat])}},
     {type:'Feature',properties:{end:1},geometry:{type:'Point',coordinates:[journey.from.lon,journey.from.lat]}},
     {type:'Feature',properties:{end:1},geometry:{type:'Point',coordinates:[journey.to.lon,journey.to.lat]}}]});
 }
@@ -947,11 +1042,11 @@ function renderAreas(){
     const s=document.createElement('span'); s.textContent=(a.journey?'Journey':a.name)+' · '+new Date(a.date).toLocaleDateString(undefined,{day:'numeric',month:'short',year:'numeric'}); t.appendChild(document.createElement('br')); t.appendChild(s);
     const go=document.createElement('button'); go.textContent='Go to';
     go.textContent=a.journey?'Show route':'Go to';
-    go.onclick=()=>{ if(a.journey) showJourney({from:a.from,to:a.to}); setFollow(false); $('pOffline').hidden=true; map?.fitBounds([[a.b[0],a.b[1]],[a.b[2],a.b[3]]],{padding:{top:90,bottom:(parseInt(getComputedStyle(document.documentElement).getPropertyValue('--dock-h'))||200)+40,left:40,right:40},maxZoom:14}); };
+    go.onclick=()=>{ if(a.journey) showJourney({from:a.from,to:a.to,route:a.route||null,label:a.label||null}); setFollow(false); $('pOffline').hidden=true; map?.fitBounds([[a.b[0],a.b[1]],[a.b[2],a.b[3]]],{padding:{top:90,bottom:(parseInt(getComputedStyle(document.documentElement).getPropertyValue('--dock-h'))||200)+40,left:40,right:40},maxZoom:14}); };
     li.append(t,go);
     if(a.journey && a.total && a.saved<a.total){
       const fin=document.createElement('button'); fin.textContent='Finish saving';
-      fin.onclick=()=>{ setPlace('from',a.from,true); setPlace('to',a.to,true); $('bSaveJourney').click(); };
+      fin.onclick=()=>{ routeJob++; setPlace('from',a.from,true); setPlace('to',a.to,true); clearTimeout(setPlace.t); routeInfo=a.route?{route:a.route,label:a.label}:null; $('bSaveJourney').click(); };
       li.appendChild(fin);
     }
     ul.appendChild(li);
