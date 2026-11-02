@@ -164,8 +164,8 @@ async function initMap(){
     map.addLayer({id:'trk-line',type:'line',source:'trk',layout:{'line-join':'round','line-cap':'round'},paint:{'line-color':'#C9440E','line-width':4}});
     map.addLayer({id:'acc-fill',type:'fill',source:'acc',paint:{'fill-color':'#1A73E8','fill-opacity':.14}});
     map.addLayer({id:'acc-line',type:'line',source:'acc',paint:{'line-color':'#1A73E8','line-width':1,'line-opacity':.5}});
-    map.addImage('arrow', arrowImage(), {pixelRatio:2});
-    map.addImage('jet-anim', animatedJet(), {pixelRatio:2});
+    if(!map.hasImage('arrow')) map.addImage('arrow', arrowImage(), {pixelRatio:2});
+    if(!map.hasImage('jet-anim')) map.addImage('jet-anim', animatedJet(), {pixelRatio:2});
     map.addLayer({id:'me-jet',type:'symbol',source:'me',layout:{'icon-image':['get','icon'],'icon-rotate':['get','brg'],
       'icon-rotation-alignment':'map','icon-allow-overlap':true,'icon-ignore-placement':true}});
     mapReady = true;
@@ -726,7 +726,6 @@ $('bDiag').onclick=async()=>{
   }catch(e){ lines.push('Cache error: '+e.name+' '+e.message); }
   for(const a of lsGet(K.areas,[])) lines.push('Saved: '+(a.journey?'journey '+a.name:'area '+(a.detail||''))+' | '+(a.total?a.saved+'/'+a.total:a.tiles+' planned')+' | '+new Date(a.date).toISOString());
   lines.push('Last save result: '+($('oResult').textContent||'none this session'));
-  lines.push('Last route lookup error: '+lastRouteError);
   lines.push('All map errors by kind: '+JSON.stringify(window.__mapErrTally||{}));
   lines.push('Recent map errors: '+(window.__mapErrors||[]).slice(-5).join(' || '));
   out.value=lines.join('\n');
@@ -779,83 +778,7 @@ function thin(pts){
   out.push(pts[pts.length-1]);
   return out;
 }
-let routeInfo=null;   // {route, label} for the journey being planned
-function icaoFor(place){
-  if(!place) return null;
-  if(place.icao) return place.icao;
-  if(!airports) return null;
-  if(place.code){ const a=airports.find(x=>x.iata===place.code); if(a) return a.icao; }
-  // a place that isn't an airport: the nearest airport within 40 km
-  let best=null, bd=40000; for(const a of airports){ const d=hav(place,a); if(d<bd){ bd=d; best=a; } } return best?.icao||null;
-}
-async function opensky(path, params){
-  const qs=new URLSearchParams(params).toString();
-  // 1. This device asks OpenSky itself. OpenSky blocks requests from cloud servers, so this is the route that
-  //    can work; it is slow at times, so allow 25 s.
-  let direct;
-  try{
-    const ac=new AbortController(), t=setTimeout(()=>ac.abort(),25000);
-    const r=await fetch('https://opensky-network.org/api/'+path+'?'+qs, {mode:'cors', signal:ac.signal}).finally(()=>clearTimeout(t));
-    if(r.status===404) return [];
-    if(r.ok) return await r.json();
-    direct = r.status===429 ? 'busy (daily limit reached)' : 'answered '+r.status;
-  }catch(e){ direct = e.name==='AbortError' ? 'no answer within 25 s' : 'blocked or unreachable'; }
-  // 2. This site's helper (works only if OpenSky accepts requests from Cloudflare)
-  let helper;
-  try{
-    const r=await fetch('/api/opensky?path='+encodeURIComponent(path)+'&'+qs);
-    if(r.ok) return await r.json();
-    try{ const j=await r.json(); helper=(j.error||'answered '+r.status).replace(/^OpenSky /,''); }catch(e){ helper='answered '+r.status; }
-  }catch(e){ helper='unreachable'; }
-  throw new Error('from this device: '+direct+'; via the site: '+helper);
-}
-let routeJob=0, lastRouteError='none';
-async function findFlownRoute(){
-  const job=++routeJob, from=J.from, to=J.to, el=$('jRoute');
-  routeInfo=null; $('bStraight').hidden=true;
-  if(!from||!to){ el.hidden=true; return; }
-  el.hidden=false;
-  if(!navigator.onLine){ el.textContent='Route: shortest path. Connect to look up the route flights actually take.'; return; }
-  await loadAirports();
-  const dep=icaoFor(from), arr=icaoFor(to), cs=(flightCallsign||'').replace(/\s/g,'').toUpperCase();
-  if(!dep||!arr){ el.textContent='Route: shortest path (no airport found to look up).'; return; }
-  el.textContent='Looking up the route flown recently…';
-  try{
-    const day=86400, now=Math.floor(Date.now()/1000), today=now-now%day;
-    let best=null, sameCallsign=false;
-    // Search back day by day (OpenSky won't search across more than two calendar days) for up to 7 days,
-    // for flights from dep to arr: the same flight number first, else the most recent
-    for(let w=0; w<7 && !sameCallsign && !(best && w>=3); w++){
-      const begin=today-w*day, end=Math.min(begin+day-1, now);
-      const list=await opensky('flights/departure',{airport:dep, begin, end});
-      if(job!==routeJob) return;
-      for(const f of (Array.isArray(list)?list:[])){
-        if(f.estArrivalAirport!==arr || !f.icao24 || !f.firstSeen || !f.lastSeen) continue;
-        const same = cs && (f.callsign||'').replace(/\s/g,'').toUpperCase()===cs;
-        if(!best || (same && !sameCallsign) || (same===sameCallsign && f.lastSeen>best.lastSeen)){ best=f; sameCallsign=same; }
-      }
-    }
-    if(!best){ el.textContent='Route: shortest path. No recent flights from '+dep+' to '+arr+' were found.'; return; }
-    const tr=await opensky('tracks/all',{icao24:best.icao24, time:Math.floor((best.firstSeen+best.lastSeen)/2)});
-    if(job!==routeJob) return;
-    let pts=(tr?.path||[]).filter(w=>w[1]!=null&&w[2]!=null).map(w=>({lat:w[1],lon:w[2]}));
-    if(pts.length<5){ el.textContent='Route: shortest path. The recent flight had too little tracking to use.'; return; }
-    pts=thin([from,...pts,to]);
-    const route=pts.map(p=>[+p.lon.toFixed(4),+p.lat.toFixed(4)]);
-    const when=new Date(best.firstSeen*1000).toLocaleDateString(undefined,{weekday:'short',day:'numeric',month:'short'});
-    const who=(best.callsign||'').trim()||'a flight';
-    routeInfo={route, label:(sameCallsign?'your flight ('+who+')':who)+' on '+when};
-    el.textContent='Route: as flown by '+routeInfo.label+', '+Math.round(routeLength(pts)/1000).toLocaleString()+' km. Your flight may differ a little.';
-    $('bStraight').hidden=false;
-    planJourney(); previewRoute();
-  }catch(e){
-    lastRouteError=e.message;
-    if(job===routeJob) el.textContent=e.message==='busy'?'Route: shortest path. The flight-tracking service is busy; try again later.':'Route: shortest path. The flight-tracking service could not be reached ('+e.message+').';
-  }
-}
-$('bStraight').onclick=()=>{ routeJob++; routeInfo=null; $('jRoute').textContent='Route: shortest path.'; $('bStraight').hidden=true; planJourney(); previewRoute(); };
-// Show the planned route on the map while planning
-function previewRoute(){ if(J.from&&J.to) showJourney({from:J.from, to:J.to, route:routeInfo?.route||null, label:routeInfo?.label||null}, true); }
+let routeInfo=null;   // a stored route for the journey being planned (none by default: the great circle is used)
 
 function journeyTiles(a,b,route){
   const tj=lsGet(K.tj,null); if(!tj) return null;
@@ -866,7 +789,8 @@ function journeyTiles(a,b,route){
   addBox(set,tpl,{lat:(a.lat+b.lat)/2,lon:(a.lon+b.lon)/2},half,0,6);
   for(let z=0;z<=2;z++) for(let x=0;x<2**z;x++) for(let y=0;y<2**z;y++) set.set(z+'/'+x+'/'+y,z);   // whole world, very coarse
   // Along the route: overview wide, then sharper coastlines and towns closer to the line
-  for(const p of densify(routeLine(a,b,route),20)){ addBox(set,tpl,p,250,0,6); addBox(set,tpl,p,150,7,8); addBox(set,tpl,p,50,9,9); }
+  // A band about 600 km wide with coastlines and towns, so a real routing off the straight line stays on detailed map
+  for(const p of densify(routeLine(a,b,route),20)){ addBox(set,tpl,p,350,0,6); addBox(set,tpl,p,300,7,8); addBox(set,tpl,p,100,9,9); }
   // departure and arrival: region around, streets close in
   for(const p of [a,b]){ addBox(set,tpl,p,35,0,12); addBox(set,tpl,p,10,13,maxz); }
   const urls=[], zs=[];
@@ -893,7 +817,6 @@ function setPlace(which, place, quiet){
   inp.value=place?(place.code?place.code+' · ':'')+place.name:''; inp.classList.toggle('set',!!place);
   $(which==='from'?'rFrom':'rTo').hidden=true; planJourney();
   if(place && !quiet) rememberPlace(place);
-  clearTimeout(setPlace.t); setPlace.t=setTimeout(findFlownRoute,300);
 }
 
 /* ---- recent places and journeys ---- */
@@ -988,7 +911,7 @@ wireSearch('from'); wireSearch('to');
 $('bFromHere').onclick=()=>{ if(!last){ toast('No position fix yet.'); return; } setPlace('from',{name:'My position',lat:+last.lat.toFixed(5),lon:+last.lon.toFixed(5),elev:last.ele!=null?Math.round(last.ele):null}); };
 
 /* ---- flight number lookup (adsbdb.com, free, needs a connection) ---- */
-let flightNo=null, flightCallsign=null;
+let flightNo=null;
 async function findFlight(){
   const raw=$('jFlight').value.toUpperCase().replace(/[^A-Z0-9]/g,''), m=$('jFlightMsg');
   const say=(t,err)=>{ m.textContent=t; m.hidden=false; m.classList.toggle('err',!!err); };
@@ -1002,14 +925,14 @@ async function findFlight(){
     const fr=(await r.json())?.response?.flightroute;
     if(!fr?.origin||!fr?.destination) throw new Error('no route');
     const ap=x=>({name:x.municipality||x.name, code:x.iata_code||x.icao_code, icao:x.icao_code, airport:x.name, lat:x.latitude, lon:x.longitude, elev:x.elevation!=null?Math.round(x.elevation*0.3048):null});
-    flightNo=fr.callsign_iata||raw; flightCallsign=fr.callsign_icao||fr.callsign||null;
+    flightNo=fr.callsign_iata||raw;
     setPlace('from',ap(fr.origin)); setPlace('to',ap(fr.destination));
     say((fr.airline?.name?fr.airline.name+' ':'')+flightNo+': '+fr.origin.name+' → '+fr.destination.name+'. Check this matches your booking; routes can change.');
   }catch(e){ say('Flight lookup failed. Check your connection, or enter the airports below.',true); }
 }
 $('bFlight').onclick=findFlight;
 $('jFlight').addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); findFlight(); } });
-$('jFlight').addEventListener('input',()=>{ flightNo=null; flightCallsign=null; });
+$('jFlight').addEventListener('input',()=>{ flightNo=null; });
 
 $('bSaveJourney').onclick=async()=>{
   if(!J.from||!J.to) return;
@@ -1057,7 +980,7 @@ function renderAreas(){
     li.append(t,go);
     if(a.journey && a.total && a.saved<a.total){
       const fin=document.createElement('button'); fin.textContent='Finish saving';
-      fin.onclick=()=>{ routeJob++; setPlace('from',a.from,true); setPlace('to',a.to,true); clearTimeout(setPlace.t); routeInfo=a.route?{route:a.route,label:a.label}:null; $('bSaveJourney').click(); };
+      fin.onclick=()=>{ setPlace('from',a.from,true); setPlace('to',a.to,true); routeInfo=a.route?{route:a.route,label:a.label}:null; $('bSaveJourney').click(); };
       li.appendChild(fin);
     }
     ul.appendChild(li);

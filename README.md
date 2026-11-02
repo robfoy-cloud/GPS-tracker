@@ -8,8 +8,7 @@ Flightroute is a web app that shows your position on a map and keeps working wit
 
 - Shows your live position on an OpenStreetMap-based map as a navigation arrow on the ground and, once airborne, an animated jet with flickering engines and vapour trails; both turn to face your direction of travel
 - **Simulate a flight** (Offline map panel): plays a whole flight along the planned journey in about a minute, to test the timer, the jet and landing detection before flying
-- **Route actually flown**: once both airports are chosen, the planner looks up a recent flight between them on the [OpenSky Network](https://opensky-network.org) (your flight number first, else the latest flight on that route in the last 6 days), draws the path it flew, saves maps along it and shows distance to go along it; the simulator flies it too. Falls back to the shortest path when nothing is found
-- **Plan a journey**: enter a flight number (looked up on [adsbdb](https://www.adsbdb.com)) or pick airports from the built-in list of 3,200 airports (works offline) or any place; recent journeys and places are remembered; it saves street maps around both ends and an overview map along the great-circle route, draws the route, and shows the distance still to go
+- **Plan a journey**: enter a flight number (looked up on [adsbdb](https://www.adsbdb.com)) or pick airports from the built-in list of 3,200 airports (works offline) or any place; recent journeys and places are remembered; it saves street maps around both ends and a band of detailed maps about 600 km wide along the great-circle route (real routings rarely stray further), draws the route, and shows the distance still to go
 - **Save the area on screen** at Overview (flights, a continent), Region or Street detail
 - Zooming in past the saved detail shows the coarser saved map instead of a blank screen
 - **Flight timer**: starts automatically once you are 50 m above the ground and moving fast, and stops 30 seconds after you slow down on landing
@@ -24,7 +23,7 @@ Flightroute is a web app that shows your position on a map and keeps working wit
 
 1. Open the site in Safari while you have a connection and allow location access.
 2. Tap **Share → Add to Home Screen**, and open Flightroute from the home screen icon from now on. Home-screen apps keep their stored maps; Safari tabs can have site data cleared after a few weeks of not being used.
-3. Before a flight, open **Offline map → Plan a journey**, enter the departure and arrival cities or airports, and tap **Save journey maps** (about 40 MB for London to Malta). To save somewhere else, frame it on screen and use **Save the area on screen**.
+3. Before a flight, open **Offline map → Plan a journey**, enter the departure and arrival cities or airports, and tap **Save journey maps** (about 80 MB for Malta to London). To save somewhere else, frame it on screen and use **Save the area on screen**.
 4. With no signal, open Flightroute from the home screen: the saved area and your position still show.
 
 On a plane: GPS works in flight mode. Sit by a window for the best fix, and keep the phone plugged in; GPS with the screen on uses a lot of battery.
@@ -39,7 +38,7 @@ Limits: iOS stops web apps from reading GPS while the screen is locked or anothe
 | `app.css` | Styles |
 | `app.js` | Map, GPS, recording, offline tiles, GPX |
 | `sw.js` | Service worker that keeps the app available offline |
-| `worker.js`, `wrangler.jsonc`, `.assetsignore` | Cloudflare Worker: serves the app's files and `/api/opensky`, a cached pass-through for route lookups. Optional secrets `OPENSKY_CLIENT_ID` / `OPENSKY_CLIENT_SECRET` raise OpenSky's daily limit |
+| `wrangler.jsonc`, `.assetsignore` | Cloudflare deployment: serves the folder as static files, leaving out repository files |
 | `manifest.webmanifest`, `icons/` | Home screen install |
 | `screenshots/` | Welcome page and install screenshots |
 | `airports.json` | Airports with scheduled flights, from [OurAirports](https://ourairports.com/data/) (public domain) |
@@ -51,4 +50,8 @@ Map tiles come from [OpenFreeMap](https://openfreemap.org) (free, no key). Place
 
 ## Running locally
 
-`python3 -m http.server 8000` in this folder, then open `http://localhost:8000` (route lookups then go to OpenSky directly). To include the Worker, run `npx wrangler dev`. Location access needs HTTPS or `localhost`.
+`python3 -m http.server 8000` in this folder, then open `http://localhost:8000`. Location access needs HTTPS or `localhost`.
+
+## Why there's no real-route lookup
+
+A version looked up the path recent flights actually flew from the OpenSky Network. It was removed: OpenSky blocks requests from cloud servers (so a Cloudflare helper can't reach it), doesn't let other websites read its data from the browser, and had no flights at all from Malta. The wider band of saved maps covers typical routings instead.
