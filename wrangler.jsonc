@@ -12,8 +12,8 @@
   // Sign-in (see supabase/SETUP.md): the same public values as in config.js. Empty means nobody can upload.
   // GITHUB_TOKEN is a secret, added in the Cloudflare dashboard, never here.
   "vars": {
-    "SUPABASE_URL": "",
-    "SUPABASE_KEY": "",
+    "SUPABASE_URL": "https://veoxasldburbztzucyrn.supabase.co",
+    "SUPABASE_KEY": "sb_publishable_Gwnaqzgzz-Abvn5hiQvhsw_32P5goIo",
     "GITHUB_REPO": "robfoy-cloud/GPS-tracker"
   }
 }

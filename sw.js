@@ -4,7 +4,7 @@
 // in the background and waits; the app shows an Update button, and tapping it switches to the new
 // version and reloads. Bump VERSION whenever any file in FILES changes.
 // Map tiles and fonts are stored separately by app.js ('fieldline-tiles-v1') and are not touched here.
-const VERSION = 26;
+const VERSION = 27;
 const SHELL = 'fieldline-shell-v' + VERSION;
 const RUNTIME = 'fieldline-runtime-v1';
 const FILES = [
