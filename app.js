@@ -659,7 +659,7 @@ function renderTracks(){
     const st=trackStats(t.pts), tr=document.createElement('tr'); if(shown===t) tr.className='sel';
     const td=(txt,cls)=>{const c=document.createElement('td');if(cls)c.className=cls;c.textContent=txt;tr.appendChild(c);return c;};
     const nm=td(t.name);
-    if(t.lib){ const s2=document.createElement('small'); s2.className='lib'; s2.textContent=t.lib==='done'?'Shared to the route library':t.lib==='queued'?'Waiting to share':t.lib==='skip'?'Not shared: '+(t.libWhy||''):''; nm.appendChild(document.createElement('br')); nm.appendChild(s2); }
+    if(t.lib){ const s2=document.createElement('small'); s2.className='lib'; s2.textContent=t.lib==='done'?'Shared to the route library':t.lib==='queued'?'Waiting to share'+(t.libWhy?' (last try: '+t.libWhy+')':''):t.lib==='skip'?'Not shared: '+(t.libWhy||''):''; nm.appendChild(document.createElement('br')); nm.appendChild(s2); }
     td(fmtDist(st.d, st.d<100000?1:0),'n'); td(fmtT(st.mv),'n');
     const a=td('','a');
     const mk=(l,fn)=>{const b=document.createElement('button');b.textContent=l;b.onclick=fn;a.appendChild(b);};
@@ -874,6 +874,7 @@ $('bDiag').onclick=async()=>{
   }catch(e){ lines.push('Cache error: '+e.name+' '+e.message); }
   for(const a of lsGet(K.areas,[])) lines.push('Saved: '+(a.journey?'journey '+a.name:'area '+(a.detail||''))+' | '+(a.total?a.saved+'/'+a.total:a.tiles+' planned')+' | '+new Date(a.date).toISOString());
   lines.push('Last save result: '+($('oResult').textContent||'none this session'));
+  lines.push('Route sharing: '+tracks.filter(t=>t.lib).map(t=>t.name+' = '+t.lib+(t.libWhy?' ('+t.libWhy+')':'')).join(' || '));
   lines.push('All map errors by kind: '+JSON.stringify(window.__mapErrTally||{}));
   lines.push('Recent map errors: '+(window.__mapErrors||[]).slice(-5).join(' || '));
   out.value=lines.join('\n');
@@ -1425,23 +1426,24 @@ function renderLibInfo(){
 }
 let sharing=false;
 async function shareQueued(){
-  if(sharing || !shareOn() || !navigator.onLine || (authOn && !access)) return;
+  if(sharing || !shareOn()) return;
+  if(!navigator.onLine || (authOn && !access)){ for(const t of tracks) if(t.lib==='queued') t.libWhy=!navigator.onLine?'offline':'not signed in'; return; }
   const queue=tracks.filter(t=>t.lib==='queued'); if(!queue.length) return;
   sharing=true;
   try{
     await loadAirports();
     for(const t of queue){
       const a=nearestAirport(t.pts[0],20000), b=nearestAirport(t.pts[t.pts.length-1],20000);
-      if(!a||!b||a.iata===b.iata){ t.lib='skip'; t.libWhy='no airport at both ends'; continue; }
+      if(!a||!b||a.iata===b.iata){ t.lib='skip'; t.libWhy='it doesn\'t start and end at airports'; toast("Couldn't share "+t.name+': '+t.libWhy+'.'); continue; }
       const tok=await authToken();
       const r=await fetch('/api/tracks',{method:'POST', headers:Object.assign({'content-type':'application/json'}, tok?{authorization:'Bearer '+tok}:{}),
         body:JSON.stringify({id:String(t.id).toLowerCase().replace(/[^a-z0-9-]/g,'').slice(0,40).padEnd(6,'0'), from:a.iata, to:b.iata, pts:t.pts.map(p=>[p.lon,p.lat,p.ele??null])})});
       const j=await r.json().catch(()=>({}));
-      if(r.ok){ t.lib='done'; t.libFile=j.file; toast('Shared '+a.iata+' → '+b.iata+' to the route library.'); }
-      else if(r.status===400){ t.lib='skip'; t.libWhy=j.error||'not accepted'; }
-      else { t.libWhy=j.error||('error '+r.status); break; }          // try again later
+      if(r.ok){ t.lib='done'; t.libWhy=''; t.libFile=j.file; toast('Shared '+a.iata+' → '+b.iata+' to the route library.'); }
+      else if(r.status===400){ t.lib='skip'; t.libWhy=j.error||'not accepted'; toast("Couldn't share: "+t.libWhy); }
+      else { t.libWhy=(j.error||'error')+' ['+r.status+']'; toast("Couldn't share yet: "+t.libWhy+'. It will try again.'); break; }          // try again later
     }
-  }catch(e){ /* offline or server trouble: try again later */ }
+  }catch(e){ const q=tracks.find(t=>t.lib==='queued'); if(q){ q.libWhy='no connection to the site ('+(e.message||e)+')'; } }
   finally{ sharing=false; lsSet(K.tracks,tracks); renderTracks(); renderLibInfo(); }
 }
 
