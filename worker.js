@@ -45,7 +45,12 @@ async function gh(env, path, opts = {}) {
   const r = await fetch((env.GITHUB_API || 'https://api.github.com') + '/repos/' + env.GITHUB_REPO + path, Object.assign({}, opts, {
     headers: { authorization: 'Bearer ' + ghToken(env), accept: 'application/vnd.github+json', 'user-agent': 'Flightroute', 'x-github-api-version': '2022-11-28', 'content-type': 'application/json' }
   }));
-  if (!r.ok) { const e = new Error('GitHub ' + r.status); e.status = r.status; throw e; }
+  if (!r.ok) {
+    // pass GitHub's own reason on, e.g. "Resource not accessible by personal access token"
+    let why = ''; try { why = ((await r.json()).message || '').slice(0, 120); } catch (e) {}
+    const step = (opts.method || 'GET') + ' ' + path.replace(/\?.*$/, '').replace(/[0-9a-f]{40}/g, '…');
+    const e = new Error('GitHub ' + r.status + (why ? ': ' + why : '') + ' at ' + step); e.status = r.status; throw e;
+  }
   return r.status === 204 ? null : r.json();
 }
 
