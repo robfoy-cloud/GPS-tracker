@@ -544,7 +544,7 @@ $('simPill').onclick=()=>endSimulation('Simulation stopped.');
 /* ---------------- flight timer ---------------- */
 // state: {phase:'ground'|'air'|'landed', takeoff, landing}; survives reloads.
 let flight = lsGet('fieldline.flight', {phase:'ground'});
-let groundAlt = null, groundAt = 0, slowSince = null;
+let groundAlt = null, groundAt = 0, slowSince = null, takeoffCand = null;
 const AIR_ABOVE = 50;        // metres above the ground to count as airborne
 function saveFlight(){ if(!sim) lsSet('fieldline.flight', flight); }
 function flightCheck(p){
@@ -558,14 +558,28 @@ function flightCheck(p){
     groundAt = gt;
   }
   if(flight.phase !== 'air'){
+    // A takeoff must hold up: aircraft speed (or 50 m up and moving) on fixes spanning at least 20 s, with a
+    // decent fix, covering over 1 km. One bad fix on the ground (a jump in position or height) doesn't count.
     const climbed = groundAlt!=null && p.ele - groundAlt > AIR_ABOVE && spd > 25;
-    if(climbed || spd > 70){ flight = {phase:'air', takeoff: wall}; slowSince = null; saveFlight();
+    if((climbed || spd > 70) && p.acc <= 100){
+      takeoffCand ??= {t:gt, lat:p.lat, lon:p.lon, n:0}; takeoffCand.n++;
+    } else takeoffCand = null;
+    const sure = takeoffCand && takeoffCand.n >= 3 && gt - takeoffCand.t >= 20000 && hav(takeoffCand, p) > 1000;
+    if(sure){ const since = gt - takeoffCand.t; takeoffCand = null; flight = {phase:'air', takeoff: wall - since, t0: gt - since}; slowSince = null; saveFlight();   // timed from the start of the takeoff run
       if(!rec && autoRecOn()){ startRecording(true, recent.slice()); toast('Airborne: flight timer started and recording your track.'); }
       else toast('Airborne: flight timer started.');
       if(map && follow && !replay && map.getZoom() > 10) map.jumpTo({center:[p.lon,p.lat], zoom:8}); }
   } else {
-    if(spd < 20){ slowSince ??= gt; if(gt - slowSince > 30000){ flight = {phase:'landed', takeoff: flight.takeoff, landing: sim ? slowSince : wall - (gt - slowSince)}; saveFlight(); groundAlt = p.ele; groundAt = gt;
-      let msg='Landed. Flight time '+fmtT((flight.landing-flight.takeoff)/1000)+'.';
+    if(spd < 20){ slowSince ??= gt; if(gt - slowSince > 30000){ flight = {phase:'landed', takeoff: flight.takeoff, t0: flight.t0, landing: sim ? slowSince : wall - (gt - slowSince)}; saveFlight(); groundAlt = p.ele; groundAt = gt;
+      const dur = flight.t0 != null ? slowSince - flight.t0 : flight.landing - flight.takeoff;    // by GPS time where known
+      let msg='Landed. Flight time '+fmtT(dur/1000)+'.';
+      const tooShort = !sim && (dur < 300000 || (rec && rec.auto && trackStats(rec.pts).d < 20000));
+      if(tooShort){
+        // not a real flight: forget it quietly
+        if(rec && rec.auto) stopRecording(false);
+        flight = {phase:'ground'}; saveFlight(); showFlight(); readouts();
+        return;
+      }
       if(rec && rec.auto){
         const j=journey, nm=(j&&j.from&&j.to ? (j.from.code||j.from.name)+' → '+(j.to.code||j.to.name) : 'Flight')+(sim?' (simulated)':'');
         const t=stopRecording(true, nm);
@@ -580,7 +594,7 @@ function flightCheck(p){
 function showFlight(){
   const el=$('flight'), now = sim ? (sim.now||Date.now()) : Date.now();
   if(flight.phase==='air'){ el.hidden=false; el.dataset.state='air'; $('flightText').textContent='In the air '+fmtT((now-flight.takeoff)/1000); }
-  else if(flight.phase==='landed' && now-flight.landing < 6*3600e3){ el.hidden=false; el.dataset.state='landed'; $('flightText').textContent='Landed · flight '+fmtT((flight.landing-flight.takeoff)/1000); }
+  else if(flight.phase==='landed' && now-flight.landing < 6*3600e3 && flight.landing-flight.takeoff >= 300000){ el.hidden=false; el.dataset.state='landed'; $('flightText').textContent='Landed · flight '+fmtT((flight.landing-flight.takeoff)/1000); }
   else el.hidden=true;
 }
 showFlight();
@@ -874,6 +888,7 @@ $('bDiag').onclick=async()=>{
   }catch(e){ lines.push('Cache error: '+e.name+' '+e.message); }
   for(const a of lsGet(K.areas,[])) lines.push('Saved: '+(a.journey?'journey '+a.name:'area '+(a.detail||''))+' | '+(a.total?a.saved+'/'+a.total:a.tiles+' planned')+' | '+new Date(a.date).toISOString());
   lines.push('Last save result: '+($('oResult').textContent||'none this session'));
+  lines.push('Viewport: '+JSON.stringify(fixViewportGap.info||{standalone:navigator.standalone===true})+' dock bottom '+Math.round($('dock').getBoundingClientRect().bottom));
   lines.push('Route sharing: '+tracks.filter(t=>t.lib).map(t=>t.name+' = '+t.lib+(t.libWhy?' ('+t.libWhy+')':'')).join(' || '));
   lines.push('All map errors by kind: '+JSON.stringify(window.__mapErrTally||{}));
   lines.push('Recent map errors: '+(window.__mapErrors||[]).slice(-5).join(' || '));
@@ -1494,11 +1509,17 @@ $('installSheet').addEventListener('click', e => { if(e.target === $('installShe
 window.fieldlineDebug = { get rec(){return rec;}, get flight(){return flight;}, get sim(){return !!sim;}, get tracks(){return tracks;}, trackStats, persistRec:()=>persistRec(true) };
 
 function fixViewportGap(){
+  // iPhone home-screen apps can lay out fixed elements in a box shorter than the screen, leaving a strip at the
+  // bottom. Measure that box with an invisible full-height probe and push bottom-anchored parts down by the shortfall.
   let gap=0;
   if(navigator.standalone===true){
+    let probe=document.getElementById('vhProbe');
+    if(!probe){ probe=document.createElement('div'); probe.id='vhProbe'; probe.style.cssText='position:fixed;top:0;bottom:0;left:0;width:1px;visibility:hidden;pointer-events:none'; document.body.appendChild(probe); }
     const portrait = innerHeight > innerWidth, full = portrait ? Math.max(screen.width,screen.height) : Math.min(screen.width,screen.height);
-    const g = Math.round(full - innerHeight);
+    const box = Math.min(probe.getBoundingClientRect().height, innerHeight, document.documentElement.clientHeight||innerHeight);
+    const g = Math.round(full - box);
     if(g>=10 && g<=140) gap=g;                     // a keyboard or a split view is bigger than this: leave those alone
+    fixViewportGap.info={full, probe:Math.round(probe.getBoundingClientRect().height), inner:innerHeight, client:document.documentElement.clientHeight, vv:Math.round(visualViewport?.height||0), gap};
   }
   document.documentElement.style.setProperty('--gapfix', gap+'px');
 }

@@ -38,9 +38,12 @@ function thin(pts, metres) { const out = [pts[0]]; for (const p of pts) if (hav(
 const length = pts => pts.slice(1).reduce((d, p, i) => d + hav(pts[i], p), 0);
 const unb64 = s => new TextDecoder().decode(Uint8Array.from(atob(s.replace(/\n/g, '')), c => c.charCodeAt(0)));
 
+// The token secret: GITHUB_TOKEN, or GITHUB_TOKEN_2 (the name used when it was first added)
+const ghToken = env => env.GITHUB_TOKEN || env.GITHUB_TOKEN_2;
+
 async function gh(env, path, opts = {}) {
   const r = await fetch((env.GITHUB_API || 'https://api.github.com') + '/repos/' + env.GITHUB_REPO + path, Object.assign({}, opts, {
-    headers: { authorization: 'Bearer ' + env.GITHUB_TOKEN, accept: 'application/vnd.github+json', 'user-agent': 'Flightroute', 'x-github-api-version': '2022-11-28', 'content-type': 'application/json' }
+    headers: { authorization: 'Bearer ' + ghToken(env), accept: 'application/vnd.github+json', 'user-agent': 'Flightroute', 'x-github-api-version': '2022-11-28', 'content-type': 'application/json' }
   }));
   if (!r.ok) { const e = new Error('GitHub ' + r.status); e.status = r.status; throw e; }
   return r.status === 204 ? null : r.json();
@@ -88,7 +91,7 @@ export default {
     }
     if (url.pathname === '/api/tracks') {
       if (req.method !== 'POST') return json({ error: 'Use POST' }, 405);
-      if (!env.GITHUB_TOKEN || !env.GITHUB_REPO) return json({ error: 'route library is not set up' }, 503);
+      if (!ghToken(env) || !env.GITHUB_REPO) return json({ error: 'route library is not set up' }, 503);
       const raw = await req.text();
       if (raw.length > 3_000_000) return json({ error: 'track too large' }, 413);
       let b; try { b = JSON.parse(raw); } catch (e) { return json({ error: 'bad request' }, 400); }

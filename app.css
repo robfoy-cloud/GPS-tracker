@@ -266,3 +266,13 @@ form.row button.primary{flex:0 0 auto;padding:12px 18px}
 .banner{top:calc(var(--top-h, 48px) + 8px)}
 .pill.update span{white-space:nowrap}.pill.update button{flex:none}
 .areas li{flex-wrap:wrap}.areas li>div:first-child{flex:1 1 160px;min-width:0}.a-btns{display:flex;gap:6px;flex-wrap:wrap}
+
+/* Tracks list: one card per track, buttons on their own line (no sideways scrolling on a phone) */
+#pTracks table,#pTracks tbody,#pTracks tr,#pTracks td{display:block}
+#pTracks thead{display:none}
+#pTracks tr{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:2px 14px;align-items:baseline;padding:10px 0;border-bottom:1px solid var(--line)}
+#pTracks td{border:0;padding:0}
+#pTracks td:first-child{font-weight:600;min-width:0}
+#pTracks td.a{grid-column:1/-1;text-align:left;display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+#pTracks td.a button{margin-left:0}
+#pTracks small.lib{font-weight:400}
