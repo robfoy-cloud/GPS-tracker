@@ -93,7 +93,7 @@ tr.sel td{background:color-mix(in srgb,var(--accent) 10%,transparent)}
 
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(var(--dock-h) + 76px);z-index:20;background:var(--fg);color:var(--bg);padding:10px 14px;border-radius:6px;font-size:14px;max-width:calc(100% - 32px)}
 
-@media (max-width:420px){.dock .val{font-size:22px}.readouts{gap:4px}.dock{gap:8px}}
+
 
 /* detail picker */
 .seg{border:0;padding:0;margin:0 auto;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
@@ -201,3 +201,39 @@ tr.sel td{background:color-mix(in srgb,var(--accent) 10%,transparent)}
 .is-steps li{display:flex;gap:12px;align-items:flex-start;line-height:1.45}
 .is-steps svg{vertical-align:-3px;color:#1A73E8}
 .is-n{flex:none;width:26px;height:26px;border-radius:50%;background:#1A73E8;color:#fff;font-weight:700;font-size:13px;display:grid;place-items:center}
+
+/* ---------- data panel (v25): units in labels, values sized to fit, one row of buttons ---------- */
+.dock,.replay{gap:9px}
+.dock .readouts,.replay .readouts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+.dock .ro,.replay .ro{min-width:0}
+.dock .lbl,.replay .lbl{display:flex;gap:4px;align-items:baseline;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:10.5px}
+.dock .lbl span:first-child,.replay .lbl span:first-child{overflow:hidden;text-overflow:ellipsis}
+.lbl .u{text-transform:none;letter-spacing:0;font-weight:500;opacity:.85}
+.dock .val,.replay .val{font-family:-apple-system,system-ui,"Segoe UI",Roboto,sans-serif;font-weight:650;letter-spacing:-.01em;
+  font-size:clamp(19px,5.6vw,27px);line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
+.dock .sub{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
+.dock-line{display:flex;align-items:center;justify-content:space-between;gap:10px;min-width:0}
+.dock-line .coord{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;font-size:12px}
+.units{flex:none;padding:5px 10px;border-radius:999px;font-size:12px;gap:5px;font-weight:500;color:var(--muted)}
+.units b{font-weight:500}
+.units b.on{color:var(--fg);font-weight:700}
+.row.btns{flex-wrap:nowrap}
+.row.btns button{flex:1 1 0;min-width:0;justify-content:center;padding:12px 6px;white-space:nowrap}
+.row.btns button.primary{flex:1.3 1 0}
+.pill.rec span:last-child{font-variant-numeric:tabular-nums}
+
+/* replay bar */
+.replay{position:fixed;left:0;right:0;bottom:0;z-index:7;background:var(--panel);border-top:1px solid var(--line);display:flex;flex-direction:column;
+  padding:10px max(16px,env(safe-area-inset-right,0px)) calc(12px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px))}
+.replay>*{max-width:720px;width:100%;margin:0 auto}
+.rp-head{display:flex;justify-content:space-between;align-items:center;gap:8px;min-width:0}
+.rp-title{display:flex;flex-direction:column;min-width:0}
+.rp-title b{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#rpSeek{width:100%;accent-color:var(--accent);margin:2px auto}
+#rpFollow[aria-pressed="true"]{color:var(--accent);border-color:var(--accent)}
+
+/* iPhone home-screen apps can be given a viewport that stops short of the screen bottom; app.js measures
+   the shortfall into --gapfix and everything anchored to the bottom moves down by it */
+#map{bottom:calc(-1 * var(--gapfix,0px))}
+.dock,.replay,.sheet{bottom:calc(-1 * var(--gapfix,0px))}
+.dock .sub{min-height:14px}

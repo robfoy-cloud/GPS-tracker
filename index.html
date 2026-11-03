@@ -34,22 +34,22 @@
     <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="12" cy="12" r="4" fill="currentColor"/><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 1v4M12 19v4M1 12h4M19 12h4" stroke="currentColor" stroke-width="2"/></svg>
   </button>
   <div class="readouts">
-    <div class="ro"><div class="lbl">Speed</div><div class="val" id="rSpd">–<small>km/h</small></div></div>
-    <div class="ro"><div class="lbl">Distance</div><div class="val" id="rDist">0.00<small>km</small></div></div>
-    <div class="ro"><div class="lbl">Time</div><div class="val" id="rTime">0:00:00</div></div>
-    <div class="ro"><div class="lbl">Altitude</div><div class="val" id="rAlt">–<small>m</small></div></div>
+    <div class="ro"><div class="lbl"><span>Speed</span><span class="u" id="uSpd">km/h</span></div><div class="val" id="rSpd">–</div></div>
+    <div class="ro"><div class="lbl"><span>Altitude</span><span class="u" id="uAlt">m</span></div><div class="val" id="rAlt">–</div></div>
+    <div class="ro"><div class="lbl"><span id="l3">Heading</span><span class="u" id="u3"></span></div><div class="val" id="r3">–</div></div>
+    <div class="ro"><div class="lbl"><span id="l4">Accuracy</span><span class="u" id="u4">m</span></div><div class="val" id="r4">–</div><div class="sub" id="s4"></div></div>
   </div>
-  <div class="coord" id="rPos">Waiting for a position fix</div>
-  <div class="row">
-    <button class="primary" id="bRec"><span class="rd"></span><span id="bRecT">Record track</span></button>
-    <button id="bStop" hidden>Stop &amp; save</button>
+  <div class="dock-line"><span class="coord" id="rPos">Waiting for a position fix</span><button class="units" id="bUnits" aria-label="Switch between metric and imperial units"><b id="uMet">km</b><span>·</span><b id="uImp">mi</b></button></div>
+  <div class="row btns">
+    <button class="primary" id="bRec"><span class="rd"></span><span id="bRecT">Record</span></button>
+    <button id="bStop" hidden>Stop</button>
     <button id="bTracks">Tracks</button>
-    <button id="bOffline">Offline map</button>
+    <button id="bOffline">Journey</button>
   </div>
 </div>
 
 <section class="sheet" id="pOffline" hidden aria-labelledby="hOff">
-  <div class="sheet-head"><h2 id="hOff">Offline map</h2><button class="x" data-close aria-label="Close">✕</button></div>
+  <div class="sheet-head"><h2 id="hOff">Journey &amp; maps</h2><button class="x" data-close aria-label="Close">✕</button></div>
   <label class="switch" for="tPreview">
     <input type="checkbox" id="tPreview">
     <span class="track" aria-hidden="true"></span>
@@ -88,6 +88,9 @@
     <div><div class="lbl">Tiles</div><div class="val" id="jTiles">–</div></div>
     <div><div class="lbl">Approx. size</div><div class="val" id="jSize">–</div></div>
   </div>
+  <p class="hint" id="jTime" hidden></p>
+  <p class="hint" id="jRoute" hidden></p>
+  <div class="row"><button id="bStraight" hidden>Use the shortest path instead</button></div>
   <div class="row"><button class="primary" id="bSaveJourney" disabled>Save journey maps</button></div>
   <p class="hint" id="oResult" hidden></p>
   <div class="row"><button id="bSim">Simulate a flight</button></div>
@@ -116,7 +119,7 @@
   <ul class="areas" id="areas"></ul>
   <div class="row"><button class="danger" id="bClear">Delete all offline maps</button></div>
   <div class="row"><button id="bAbout">About &amp; install</button></div>
-  <p class="ver">Flightroute version 24 · 2 Nov 2026</p>
+  <p class="ver">Flightroute version 25 · 3 Nov 2026</p>
 </section>
 
 <section class="sheet" id="pTracks" hidden aria-labelledby="hTr">
@@ -169,7 +172,8 @@
         <li>Flight number lookup and a built-in list of 3,200 airports</li>
         <li>Offline maps from OpenStreetMap, saved on your phone</li>
         <li>Flight timer that starts at takeoff and stops on landing</li>
-        <li>Speed, altitude, distance to destination and GPS signal strength</li>
+        <li>Speed, altitude, distance to go and an estimated arrival time, in metric or imperial</li>
+        <li>Replay your saved flights, and reuse a saved or imported track as the route next time</li>
         <li>Record your track and export it as GPX</li>
         <li>Try a simulated flight before you go</li>
       </ul>
@@ -197,6 +201,18 @@
     <p class="hint" id="isNote">Open it from the home screen from now on: saved maps are kept there, and it opens straight to the map.</p>
     <div class="row"><button class="primary" id="isDone">Got it</button></div>
   </div>
+</section>
+
+<section class="replay" id="replay" hidden aria-label="Track replay">
+  <div class="rp-head"><div class="rp-title"><span class="lbl">Replay</span><b id="rpName"></b></div><button class="x" id="rpClose" aria-label="Close replay">✕</button></div>
+  <div class="readouts">
+    <div class="ro"><div class="lbl"><span>Speed</span><span class="u" id="rpuSpd">km/h</span></div><div class="val" id="rpSpd">–</div></div>
+    <div class="ro"><div class="lbl"><span>Altitude</span><span class="u" id="rpuAlt">m</span></div><div class="val" id="rpAlt">–</div></div>
+    <div class="ro"><div class="lbl"><span>Flown</span><span class="u" id="rpuDist">km</span></div><div class="val" id="rpDist">–</div></div>
+    <div class="ro"><div class="lbl"><span>Time</span><span class="u" id="rpuClock"></span></div><div class="val" id="rpTime">–</div></div>
+  </div>
+  <input type="range" id="rpSeek" min="0" max="1000" step="1" value="0" aria-label="Position in the replay">
+  <div class="row btns"><button class="primary" id="rpPlay">Pause</button><button id="rpSpeed" aria-label="Replay speed">60×</button><button id="rpFollow" aria-pressed="true">Follow</button></div>
 </section>
 
 <div class="toast" id="toast" hidden></div>

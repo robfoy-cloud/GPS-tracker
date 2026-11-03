@@ -15,7 +15,10 @@ Flightroute is a web app that shows your position on a map and keeps working wit
 - **GPS signal** bars and accuracy in the top bar, with a warning when fixes stop arriving; an Offline pill when there is no connection
 - **Records flights automatically** (switch in Tracks, on by default): starts at takeoff, including the last 3 minutes on the ground, and saves the track at landing, named after the journey
 - Records tracks by hand too (record, pause, stop); a recording in progress is kept on the phone, so it resumes after a reload or app update
-- Shows speed, distance, time and altitude, and lists saved tracks
+- **Data panel**: speed, altitude, distance to go and **estimated arrival** (from the last 5 minutes' ground speed, with descent starting about 3 nm per 1,000 ft and averaging two thirds of cruise speed, plus approach time); heading and accuracy when no journey is planned. Recording distance and time show in the Recording pill
+- **Metric or imperial** switch (km · mi) beside the coordinates; applies everywhere including the map scale
+- **Replay** any saved or imported track: play/pause, speed (10× to 1200×), scrub, follow; shows speed, altitude, distance flown and clock time
+- **Saved tracks as routes**: when planning, a saved or imported track that starts near From and ends near To is used as the route (line, saved maps, distance to go, arrival estimate, simulator); otherwise the shortest path
 - Exports tracks as GPX (share sheet on iPhone) and imports GPX files
 - Installs to the home screen and opens offline. Opening the site in a browser shows a store-style welcome page with **Install** (the browser's own install prompt on Android and desktop Chrome; a three-step guide on iPhone, iPad and Mac Safari, which don't allow one-tap install) and **Web version**
 
@@ -23,7 +26,7 @@ Flightroute is a web app that shows your position on a map and keeps working wit
 
 1. Open the site in Safari while you have a connection and allow location access.
 2. Tap **Share → Add to Home Screen**, and open Flightroute from the home screen icon from now on. Home-screen apps keep their stored maps; Safari tabs can have site data cleared after a few weeks of not being used.
-3. Before a flight, open **Offline map → Plan a journey**, enter the departure and arrival cities or airports, and tap **Save journey maps** (about 80 MB for Malta to London). To save somewhere else, frame it on screen and use **Save the area on screen**.
+3. Before a flight, open **Journey → Plan a journey**, enter the departure and arrival cities or airports, and tap **Save journey maps** (about 80 MB for Malta to London). To save somewhere else, frame it on screen and use **Save the area on screen**.
 4. With no signal, open Flightroute from the home screen: the saved area and your position still show.
 
 On a plane: GPS works in flight mode. Sit by a window for the best fix, and keep the phone plugged in; GPS with the screen on uses a lot of battery.
@@ -54,4 +57,4 @@ Map tiles come from [OpenFreeMap](https://openfreemap.org) (free, no key). Place
 
 ## Why there's no real-route lookup
 
-A version looked up the path recent flights actually flew from the OpenSky Network. It was removed: OpenSky blocks requests from cloud servers (so a Cloudflare helper can't reach it), doesn't let other websites read its data from the browser, and had no flights at all from Malta. The wider band of saved maps covers typical routings instead.
+A version looked up the path recent flights actually flew from the OpenSky Network. It was removed: OpenSky blocks requests from cloud servers (so a Cloudflare helper can't reach it), doesn't let other websites read its data from the browser, and had no flights at all from Malta. The wider band of saved maps covers typical routings instead, and any saved or imported GPX of the same trip is used as the route.

@@ -16,6 +16,19 @@ const tileKB = z => z<=5?180 : z<=7?110 : z<=10?60 : 35;
 const R = 6371008.8, rad = d => d * Math.PI / 180;
 function hav(a, b){const dLa=rad(b.lat-a.lat),dLo=rad(b.lon-a.lon);const s=Math.sin(dLa/2)**2+Math.cos(rad(a.lat))*Math.cos(rad(b.lat))*Math.sin(dLo/2)**2;return 2*R*Math.asin(Math.sqrt(s));}
 const fmtT = s => {s=Math.max(0,Math.round(s));const h=Math.floor(s/3600),m=Math.floor(s%3600/60),x=s%60;return h+':'+String(m).padStart(2,'0')+':'+String(x).padStart(2,'0');};
+/* Units: metric (km, km/h, m) or imperial (mi, mph, ft) */
+let units = (()=>{ try{ return localStorage.getItem('fieldline.units')==='imperial'?'imperial':'metric'; }catch(e){ return 'metric'; } })();
+const U = {
+  spd: mps => units==='imperial' ? mps*2.236936 : mps*3.6,  spdU: () => units==='imperial' ? 'mph' : 'km/h',
+  dist: m => units==='imperial' ? m/1609.344 : m/1000,       distU: () => units==='imperial' ? 'mi' : 'km',
+  alt: m => units==='imperial' ? m*3.28084 : m,             altU: () => units==='imperial' ? 'ft' : 'm'
+};
+const n0 = x => Math.round(x).toLocaleString();
+const fmtDist = (m, dp=0) => (dp ? U.dist(m).toFixed(dp) : n0(U.dist(m)))+' '+U.distU();
+const fmtDur = sec => { sec=Math.max(0,Math.round(sec/60)); const h=Math.floor(sec/60), m=sec%60; return h ? h+' h '+String(m).padStart(2,'0') : m+' min'; };
+const fmtClock = ms => new Date(ms).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+const compass = d => ['N','NE','E','SE','S','SW','W','NW'][Math.round(((d%360)+360)%360/45)%8];
+function dmShort(v,pos,neg){const a=Math.abs(v),d=Math.floor(a),m=(a-d)*60;return d+'°'+m.toFixed(2).padStart(5,'0')+'′'+(v>=0?pos:neg);}
 function dm(v,pos,neg){const a=Math.abs(v),d=Math.floor(a),m=(a-d)*60;return d+'° '+m.toFixed(3).padStart(6,'0')+'′ '+(v>=0?pos:neg);}
 const fmtMB = b => b>=1e9?(b/1e9).toFixed(1)+' GB':b>=1e6?(b/1e6).toFixed(1)+' MB':Math.max(1,Math.round(b/1e3))+' KB';
 function lsGet(k,def){try{const v=localStorage.getItem(k);return v==null?def:JSON.parse(v);}catch(e){return def;}}
@@ -110,7 +123,7 @@ maplibregl.addProtocol('cached', async (params, ac) => {
 });
 
 /* ---------------- state ---------------- */
-let map = null, mapReady = false;
+let map = null, mapReady = false, scaleCtl = null;
 let last = null, follow = true, firstFix = true, watchId = null, bearing = 0;
 let rec = null, paused = false, wake = null;
 let tracks = lsGet(K.tracks, []);
@@ -136,8 +149,8 @@ async function initMap(){
   map.touchZoomRotate.disableRotation();
   window.fieldlineMap = map;   // handy for debugging from the browser console
   map.addControl(new maplibregl.NavigationControl({showCompass:false}),'top-right');
-  map.addControl(new maplibregl.ScaleControl({unit:'metric',maxWidth:110}),'bottom-left');
-  map.on('dragstart', e => { if (e.originalEvent) setFollow(false); });
+  scaleCtl = new maplibregl.ScaleControl({unit:units,maxWidth:110}); map.addControl(scaleCtl,'bottom-left');
+  map.on('dragstart', e => { if (!e.originalEvent) return; if (replay){ replay.follow=false; $('rpFollow').setAttribute('aria-pressed','false'); } else setFollow(false); });
   map.on('moveend', () => { if (!$('pOffline').hidden) estimate(); });
   // A tile that is not saved fails; ask the map at once to look for coarser saved tiles to draw instead
   // (otherwise it waits for the next pan or zoom and leaves the square blank).
@@ -167,6 +180,11 @@ async function initMap(){
     if(!map.hasImage('arrow')) map.addImage('arrow', arrowImage(), {pixelRatio:2});
     if(!map.hasImage('jet-anim')) map.addImage('jet-anim', animatedJet(), {pixelRatio:2});
     map.addLayer({id:'me-jet',type:'symbol',source:'me',layout:{'icon-image':['get','icon'],'icon-rotate':['get','brg'],
+      'icon-rotation-alignment':'map','icon-allow-overlap':true,'icon-ignore-placement':true}});
+    map.addSource('replay',{type:'geojson',data:empty});
+    map.addLayer({id:'replay-case',type:'line',source:'replay',filter:['==','$type','LineString'],layout:{'line-join':'round','line-cap':'round'},paint:{'line-color':'#FFFFFF','line-width':7}});
+    map.addLayer({id:'replay-line',type:'line',source:'replay',filter:['==','$type','LineString'],layout:{'line-join':'round','line-cap':'round'},paint:{'line-color':'#C9440E','line-width':4}});
+    map.addLayer({id:'replay-pos',type:'symbol',source:'replay',filter:['==','$type','Point'],layout:{'icon-image':['get','icon'],'icon-rotate':['get','brg'],
       'icon-rotation-alignment':'map','icon-allow-overlap':true,'icon-ignore-placement':true}});
     mapReady = true;
     drawPosition(); drawTrack(); drawSaved(); drawJourney();
@@ -283,7 +301,7 @@ setInterval(()=>{
 document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible') restartGPS(); });
 /* Precise Location off: iOS blurs the position to several km. Say how to fix it. */
 let coarseFixes = 0;
-let lastSave = 0, headFrom = null, recent = [];   // recent: last 3 minutes of good fixes
+let lastSave = 0, headFrom = null, recent = [], speedHist = [];   // recent: last 3 minutes of good fixes; speedHist: last 5 minutes for the arrival estimate
 function onPos(pos){
   const c = pos.coords;
   const p = {lat:c.latitude, lon:c.longitude, acc:c.accuracy, ele:c.altitude, spd:c.speed, t:pos.timestamp};
@@ -315,6 +333,7 @@ function onPos(pos){
     if(firstFix){ firstFix=false; map.jumpTo({center:[p.lon,p.lat], zoom:Math.max(map.getZoom(),(p.spd||0)>40?7:16)}); }
     else if(follow) map.easeTo({center:[p.lon,p.lat], duration:600});
   }
+  if(p.acc<=250){ speedHist.push({lat:p.lat,lon:p.lon,t:p.t}); while(speedHist.length && p.t-speedHist[0].t>300000) speedHist.shift(); }
   flightCheck(p);
   drawPosition(); readouts();
 }
@@ -334,22 +353,141 @@ function trackStats(pts){
   for(let i=1;i<pts.length;i++){const a=pts[i-1],b=pts[i],seg=hav(a,b),dt=(b.t-a.t)/1000;d+=seg;if(dt>0&&dt<900&&seg/dt>0.3)mv+=dt;}
   return {d, mv};
 }
-function readouts(){
-  const st = rec ? trackStats(rec.pts) : {d:0,mv:0};
-  $('rDist').innerHTML = (st.d/1000).toFixed(2)+'<small>km</small>';
-  $('rTime').textContent = fmtT(rec ? (Date.now()-rec.startedAt-rec.pausedMs-(paused?Date.now()-paused:0))/1000 : 0);
-  const kmh = last&&last.spd!=null ? last.spd*3.6 : null;
-  $('rSpd').innerHTML = (kmh==null ? '–' : kmh>=100 ? Math.round(kmh).toLocaleString() : kmh.toFixed(1))+'<small>km/h</small>';
-  $('rAlt').innerHTML = (last&&last.ele!=null ? Math.round(last.ele).toLocaleString() : '–')+'<small>m</small>';
-  let togo='';
-  if(journey&&last){
-    let d=hav(last,journey.to);
-    if(journey.route){ const pts=journey.route.map(([lon,lat])=>({lat,lon})); let bi=0,bd=Infinity; pts.forEach((p,i)=>{const x=hav(last,p); if(x<bd){bd=x;bi=i;}}); d=bd+routeLength(pts.slice(bi)); }
-    togo='  ·  '+Math.round(d/1000).toLocaleString()+' km to '+journey.to.name;
-  }
-  $('rPos').textContent = last ? dm(last.lat,'N','S')+'  '+dm(last.lon,'E','W')+(last.ele!=null?'  ·  '+Math.round(last.ele).toLocaleString()+' m / '+Math.round(last.ele*3.28084).toLocaleString()+' ft':'')+togo : 'Waiting for a position fix';
+function remainingDistance(){
+  if(!journey||!last) return null;
+  if(!journey.route) return hav(last,journey.to);
+  const pts=journey.route.map(([lon,lat])=>({lat,lon})); let bi=0,bd=Infinity;
+  pts.forEach((p,i)=>{const x=hav(last,p); if(x<bd){bd=x;bi=i;}});
+  // past the nearest route point already? measure from the next one
+  if(bi<pts.length-1 && hav(last,pts[bi+1])<hav(pts[bi],pts[bi+1])) bi++;
+  return hav(last,pts[bi])+routeLength(pts.slice(bi));
 }
-setInterval(()=>{ if(rec) readouts(); showFlight(); }, 1000);
+function smoothedSpeed(){
+  if(speedHist.length<2) return null;
+  const a=speedHist[0], b=speedHist[speedHist.length-1], dt=(b.t-a.t)/1000;
+  if(dt<60) return null;
+  return routeLength(speedHist)/dt;    // m/s along the actual path over the last few minutes
+}
+/* Arrival estimate (touchdown) while airborne: cruise at the recent ground speed, then descent and approach.
+   Airliners start down about 3 nautical miles per 1,000 ft of height and average roughly two thirds of
+   cruise ground speed on the way down, plus a few minutes of approach and sequencing. */
+function estimateArrival(D){
+  if(D==null || !last || flight.phase!=='air') return null;
+  const v = smoothedSpeed() ?? last.spd ?? 0;
+  if(v < 50) return null;                                    // below ~180 km/h: no sensible estimate
+  const altFt = Math.max(0,(last.ele||0) - (journey.to.elev||0))*3.28084;
+  const Dd = Math.min(D, altFt/1000*3*1852);                 // still to fly in the descent
+  const vd = altFt < 10000 ? Math.max(75, Math.min(v, 130)) : Math.max(110, Math.min(v*0.66, 175));
+  let sec = (D-Dd)/v + Dd/vd + (D>20000 ? 240 : D>5000 ? 60 : 0);
+  return {at: Date.now()+sec*1000, sec};
+}
+// Planned flying time, for the journey planner: ~780 km/h average plus ~20 min for climb, descent and approach
+const flyingTime = m => m/1000/780*3600 + 1200;
+
+function readouts(){
+  const set=(id,v)=>{ const el=$(id); if(el.textContent!==v) el.textContent=v; };
+  const sp = last&&last.spd!=null ? U.spd(last.spd) : null;
+  set('rSpd', sp==null ? '–' : sp>=100 ? n0(sp) : sp.toFixed(1)); set('uSpd', U.spdU());
+  set('rAlt', last&&last.ele!=null ? n0(U.alt(last.ele)) : '–'); set('uAlt', U.altU());
+  const D = remainingDistance();
+  if(D!=null){ set('l3','To '+(journey.to.code||journey.to.name)); set('r3', n0(U.dist(D))); set('u3', U.distU()); }
+  else { set('l3','Heading'); set('r3', last ? Math.round(((bearing%360)+360)%360)+'°' : '–'); set('u3', last ? compass(bearing) : ''); }
+  const eta = estimateArrival(D);
+  if(eta){
+    // 12-hour clocks: keep the big number short and put AM/PM on the line below
+    const parts=new Intl.DateTimeFormat([], {hour:'numeric', minute:'2-digit'}).formatToParts(new Date(eta.at));
+    const ampm=parts.find(x=>x.type==='dayPeriod')?.value, hm=parts.filter(x=>x.type!=='dayPeriod').map(x=>x.value).join('').trim();
+    set('l4','Arrive'); set('u4',''); set('r4', hm); set('s4',(ampm?ampm+' · ':'')+'in '+fmtDur(eta.sec)); }
+  else if(D!=null){ set('l4','Flying time'); set('u4',''); set('r4', '≈'+fmtDur(flyingTime(D)).replace(' min','m').replace(' h ','h')); set('s4', flight.phase==='air' ? 'estimating…' : 'estimate'); }
+  else if(rec){ set('l4','Track'); set('u4',U.distU()); set('r4', U.dist(trackStats(rec.pts).d).toFixed(1)); set('s4',''); }
+  else { set('l4','Accuracy'); set('u4',U.altU()); set('r4', last ? '±'+n0(U.alt(last.acc)) : '–'); set('s4',''); }
+  if(rec){ const st=trackStats(rec.pts), el=(Date.now()-rec.startedAt-rec.pausedMs-(paused?Date.now()-paused:0))/1000;
+    set('recText', (paused?'Paused':'Recording')+' · '+fmtDist(st.d, st.d<100000?1:0)+' · '+fmtT(el)); }
+  set('rPos', last ? dmShort(last.lat,'N','S')+'  '+dmShort(last.lon,'E','W') : 'Waiting for a position fix');
+  $('uMet').classList.toggle('on', units==='metric'); $('uImp').classList.toggle('on', units==='imperial');
+}
+function setUnits(u){
+  units=u; try{ localStorage.setItem('fieldline.units',u); }catch(e){}
+  try{ scaleCtl?.setUnit(u); }catch(e){}
+  readouts(); renderTracks(); planJourney(); if(replay) replayFrame(true);
+}
+$('bUnits').onclick=()=>setUnits(units==='metric'?'imperial':'metric');
+setInterval(()=>{ readouts(); showFlight(); }, 1000);
+
+/* ---------------- replay a saved track ---------------- */
+let replay = null;   // {t, pts, times[], cum[], total, pos, rate, playing, follow, raf, lastFrame}
+const RATES=[10,30,60,120,300,600,1200];
+function startReplay(t){
+  if(!map || !mapReady){ toast('The map is still loading.'); return; }
+  if(t.pts.length<2){ toast('This track is too short to replay.'); return; }
+  stopReplay(true);
+  const pts=t.pts;
+  // Times: the recorded ones, or, for files without times, an even pace (about 800 km/h for long tracks)
+  let times = pts.map(p=>p.t||0);
+  const ok = times.every((x,i)=>x>0 && (i===0 || x>=times[i-1])) && times[times.length-1]>times[0];
+  const cum=[0]; for(let i=1;i<pts.length;i++) cum.push(cum[i-1]+hav(pts[i-1],pts[i]));
+  if(!ok){ const v = cum[cum.length-1]>100000 ? 222 : 8; times = cum.map(d=>d/v*1000); }
+  else times = times.map(x=>x-times[0]);
+  const total = times[times.length-1];
+  // about a minute of playback by default
+  const want = total/1000/60, rate = RATES.reduce((a,b)=>Math.abs(b-want)<Math.abs(a-want)?b:a);
+  replay={t, pts, times, cum, total, pos:0, rate, playing:true, follow:true, raf:0, lastFrame:0, realTimes:ok, i:0};
+  ['me-jet','acc-fill','acc-line','trk-line','trk-case'].forEach(id=>map.getLayer(id)&&map.setLayoutProperty(id,'visibility','none'));
+  shown=t; drawSaved();
+  $('dock').hidden=true; $('replay').hidden=false; $('rpName').textContent=t.name;
+  $('rpSpeed').textContent=rate+'×'; $('rpPlay').textContent='Pause'; $('rpFollow').setAttribute('aria-pressed','true');
+  const long = cum[cum.length-1] > 50000;
+  map.jumpTo({center:[pts[0].lon,pts[0].lat], zoom: long ? 8 : 15});
+  replayFrame(true); replay.raf=requestAnimationFrame(replayTick);
+}
+function replayTick(now){
+  if(!replay) return;
+  if(replay.playing){
+    if(replay.lastFrame) replay.pos = Math.min(replay.total, replay.pos + (now-replay.lastFrame)*replay.rate);
+    replay.lastFrame = now;
+    if(replay.pos>=replay.total){ replay.playing=false; $('rpPlay').textContent='Play again'; }
+    replayFrame(false);
+  } else replay.lastFrame = 0;
+  replay.raf=requestAnimationFrame(replayTick);
+}
+let replayUi=0;
+function replayFrame(force){
+  const r=replay; if(!r) return;
+  // the segment containing r.pos
+  let i=r.i; while(i<r.times.length-2 && r.times[i+1]<r.pos) i++; while(i>0 && r.times[i]>r.pos) i--; r.i=i;
+  const a=r.pts[i], b=r.pts[i+1], seg=Math.max(1,r.times[i+1]-r.times[i]), f=Math.min(1,Math.max(0,(r.pos-r.times[i])/seg));
+  const p={lat:a.lat+(b.lat-a.lat)*f, lon:a.lon+(b.lon-a.lon)*f};
+  const spd=hav(a,b)/(seg/1000), ele=(a.ele!=null&&b.ele!=null)?a.ele+(b.ele-a.ele)*f:(a.ele??null);
+  const ground=r.pts[0].ele??0, air = spd>60 || (ele!=null && ele-ground>300);
+  const line=r.pts.slice(0,i+1).map(q=>[q.lon,q.lat]); line.push([p.lon,p.lat]);
+  map.getSource('replay').setData({type:'FeatureCollection',features:[
+    {type:'Feature',properties:{},geometry:{type:'LineString',coordinates:line}},
+    {type:'Feature',properties:{brg:brg(a,b),icon:air?'jet-anim':'arrow'},geometry:{type:'Point',coordinates:[p.lon,p.lat]}}]});
+  setJetAnimation(air || flight.phase==='air');
+  if(r.follow) map.jumpTo({center:[p.lon,p.lat]});
+  const now=performance.now(); if(!force && now-replayUi<200) return; replayUi=now;
+  $('rpSpd').textContent=U.spd(spd)>=100?n0(U.spd(spd)):U.spd(spd).toFixed(1); $('rpuSpd').textContent=U.spdU();
+  $('rpAlt').textContent=ele==null?'–':n0(U.alt(ele)); $('rpuAlt').textContent=U.altU();
+  const flown=r.cum[i]+hav(a,p); $('rpDist').textContent=U.dist(flown)>=100?n0(U.dist(flown)):U.dist(flown).toFixed(1); $('rpuDist').textContent=U.distU();
+  // big number: time since the start; label: the clock time then (24-hour or 12-hour without AM/PM, to stay short)
+  $('rpTime').textContent=fmtT(r.pos/1000);
+  $('rpuClock').textContent = r.realTimes ? new Intl.DateTimeFormat([], {hour:'numeric', minute:'2-digit'}).formatToParts(new Date(r.t.pts[0].t+r.pos)).filter(x=>x.type!=='dayPeriod').map(x=>x.value).join('').trim() : 'est.';
+  $('rpSeek').value=String(Math.round(r.pos/r.total*1000));
+}
+function stopReplay(quiet){
+  if(!replay) return;
+  cancelAnimationFrame(replay.raf); replay=null;
+  if(map){ map.getSource('replay')?.setData(empty);
+    ['me-jet','acc-fill','acc-line','trk-line','trk-case'].forEach(id=>map.getLayer(id)&&map.setLayoutProperty(id,'visibility','visible')); }
+  $('replay').hidden=true; $('dock').hidden=false;
+  setJetAnimation(flight.phase==='air');
+  if(!quiet && last && follow) map?.easeTo({center:[last.lon,last.lat], duration:400});
+}
+$('rpClose').onclick=()=>stopReplay();
+$('rpPlay').onclick=()=>{ if(!replay) return; if(replay.pos>=replay.total){ replay.pos=0; replay.i=0; } replay.playing=!replay.playing; replay.lastFrame=0; if(replay.playing){ replay.follow=true; $('rpFollow').setAttribute('aria-pressed','true'); } $('rpPlay').textContent=replay.playing?'Pause':'Play'; };
+$('rpSpeed').onclick=()=>{ if(!replay) return; const k=RATES.indexOf(replay.rate); replay.rate=RATES[(k+1)%RATES.length]; $('rpSpeed').textContent=replay.rate+'×'; };
+$('rpFollow').onclick=()=>{ if(!replay) return; replay.follow=!replay.follow; $('rpFollow').setAttribute('aria-pressed',String(replay.follow)); replayFrame(true); };
+$('rpSeek').addEventListener('input',e=>{ if(!replay) return; replay.pos=e.target.value/1000*replay.total; replay.i=0; if(replay.pos<replay.total && $('rpPlay').textContent==='Play again') $('rpPlay').textContent='Play'; replayFrame(true); });
 
 /* ---------------- flight simulator (for testing on the ground) ---------------- */
 let sim = null;   // {timer, saved}
@@ -429,7 +567,7 @@ function flightCheck(p){
       if(rec && rec.auto){
         const j=journey, nm=(j&&j.from&&j.to ? (j.from.code||j.from.name)+' → '+(j.to.code||j.to.name) : 'Flight')+(sim?' (simulated)':'');
         const t=stopRecording(true, nm);
-        if(t) msg+=' Track saved: '+(trackStats(t.pts).d/1000).toFixed(0)+' km.';
+        if(t) msg+=' Track saved: '+fmtDist(trackStats(t.pts).d)+'.';
       }
       toast(msg); } }
     else slowSince = null;
@@ -450,9 +588,9 @@ document.addEventListener('visibilitychange', ()=>{ if(rec && document.visibilit
 function setRecButtons(){
   const b=$('bRec');
   b.classList.toggle('recording', !!rec && !paused);
-  $('bRecT').textContent = !rec ? 'Record track' : paused ? 'Resume' : 'Pause';
+  $('bRecT').textContent = !rec ? 'Record' : paused ? 'Resume' : 'Pause';
   $('bStop').hidden = !rec;
-  $('recPill').hidden = !rec; $('recText').textContent = paused ? 'Paused' : 'Recording';
+  $('recPill').hidden = !rec; readouts();
 }
 const autoRecOn = () => lsGet('fieldline.autoRec', true) !== false;
 const REC_KEY='fieldline.rec';
@@ -514,9 +652,10 @@ function renderTracks(){
   for(const t of tracks){
     const st=trackStats(t.pts), tr=document.createElement('tr'); if(shown===t) tr.className='sel';
     const td=(txt,cls)=>{const c=document.createElement('td');if(cls)c.className=cls;c.textContent=txt;tr.appendChild(c);return c;};
-    td(t.name); td((st.d/1000).toFixed(2)+' km','n'); td(fmtT(st.mv),'n');
+    td(t.name); td(fmtDist(st.d, st.d<100000?1:0),'n'); td(fmtT(st.mv),'n');
     const a=td('','a');
     const mk=(l,fn)=>{const b=document.createElement('button');b.textContent=l;b.onclick=fn;a.appendChild(b);};
+    mk('Replay',()=>{ $('pTracks').hidden=true; startReplay(t); });
     mk('Show',()=>{shown=t;drawSaved();renderTracks();$('pTracks').hidden=true;fitTrack(t);});
     mk('GPX',()=>exportGPX(t));
     mk(t._c?'Confirm':'Delete',()=>{
@@ -553,7 +692,7 @@ $('fImp').onchange=async e=>{
     }).filter(p=>isFinite(p.lat)&&isFinite(p.lon));
     if(pts.length<2) throw 0;
     const t={id:'i'+Date.now(),name:doc.getElementsByTagName('name')[0]?.textContent?.trim()||f.name.replace(/\.gpx$/i,''),pts};
-    tracks.unshift(t); lsSet(K.tracks,tracks); shown=t; drawSaved(); renderTracks(); $('pTracks').hidden=true; fitTrack(t);
+    tracks.unshift(t); lsSet(K.tracks,tracks); shown=t; drawSaved(); renderTracks(); $('pTracks').hidden=true; fitTrack(t); matchSavedRoute();
     toast('Imported '+pts.length+' points');
   }catch(err){ toast('That file has no GPX track points.'); }
   e.target.value='';
@@ -778,7 +917,32 @@ function thin(pts){
   out.push(pts[pts.length-1]);
   return out;
 }
-let routeInfo=null;   // a stored route for the journey being planned (none by default: the great circle is used)
+let routeInfo=null;   // the route for the journey being planned: a saved track between the same places, else the great circle
+/* Saved and imported tracks are real flown paths. If one starts near "From" and ends near "To", use it as the
+   route: drawn on the map, maps saved along it, distance to go and arrival measured along it, flown by the simulator. */
+function matchSavedRoute(){
+  const el=$('jRoute');
+  routeInfo=null; $('bStraight').hidden=true;
+  if(!J.from||!J.to){ el.hidden=true; return; }
+  const near=(p,q)=>hav(p,q)<25000;
+  let best=null, reversed=false;
+  for(const t of tracks){
+    if(t.pts.length<10 || (t.name||'').includes('(simulated)')) continue;
+    const a=t.pts[0], b=t.pts[t.pts.length-1], when=t.pts[0].t||+String(t.id).slice(1)||0;
+    if(near(a,J.from)&&near(b,J.to)){ if(!best||reversed||when>best.when){ best={t,when}; reversed=false; } }
+    else if(!best && near(a,J.to)&&near(b,J.from)){ best={t,when}; reversed=true; }
+  }
+  el.hidden=false;
+  if(!best){ el.textContent='Route: shortest path. To follow a real path, import a GPX of this flight in Tracks (or record it once); it will be used next time.'; planJourney(); previewRoute(); return; }
+  let pts=best.t.pts.map(p=>({lat:p.lat,lon:p.lon})); if(reversed) pts.reverse();
+  pts=thin([J.from,...pts,J.to]);
+  routeInfo={route:pts.map(p=>[+p.lon.toFixed(4),+p.lat.toFixed(4)]), label:best.t.name+(reversed?' (flown the other way)':'')};
+  el.textContent='Route: following your saved track “'+routeInfo.label+'”, '+fmtDist(routeLength(pts))+'. Real routes vary a little from day to day.';
+  $('bStraight').hidden=false;
+  planJourney(); previewRoute();
+}
+function previewRoute(){ if(J.from&&J.to) showJourney({from:J.from, to:J.to, route:routeInfo?.route||null, label:routeInfo?.label||null}, true); }
+$('bStraight').onclick=()=>{ routeInfo=null; $('jRoute').textContent='Route: shortest path.'; $('bStraight').hidden=true; planJourney(); previewRoute(); };
 
 function journeyTiles(a,b,route){
   const tj=lsGet(K.tj,null); if(!tj) return null;
@@ -804,10 +968,12 @@ function journeyTiles(a,b,route){
 }
 function planJourney(){
   const ok=J.from&&J.to;
-  $('jEst').hidden=!ok;
+  $('jEst').hidden=!ok; if(!ok) $('jTime').hidden=true;
   if(!ok){ $('bSaveJourney').disabled=true; return; }
   const plan=journeyTiles(J.from,J.to,routeInfo?.route);
-  $('jDist').innerHTML=Math.round(routeLength(routeLine(J.from,J.to,routeInfo?.route))/1000).toLocaleString()+'<small>km</small>';
+  const rl=routeLength(routeLine(J.from,J.to,routeInfo?.route));
+  $('jDist').innerHTML=n0(U.dist(rl))+'<small>'+U.distU()+'</small>';
+  $('jTime').hidden=false; $('jTime').textContent='Flying time about '+fmtDur(flyingTime(rl))+', plus taxiing.';
   if(!plan){ $('jTiles').textContent='–'; $('jSize').textContent='–'; $('bSaveJourney').disabled=true; return; }
   $('jTiles').textContent=plan.tiles.toLocaleString(); $('jSize').textContent='≈ '+fmtMB(plan.bytes);
   $('bSaveJourney').disabled=!!saving||plan.urls.length>MAX_TILES*2;
@@ -817,6 +983,7 @@ function setPlace(which, place, quiet){
   inp.value=place?(place.code?place.code+' · ':'')+place.name:''; inp.classList.toggle('set',!!place);
   $(which==='from'?'rFrom':'rTo').hidden=true; planJourney();
   if(place && !quiet) rememberPlace(place);
+  clearTimeout(setPlace.t); setPlace.t=setTimeout(matchSavedRoute,100);
 }
 
 /* ---- recent places and journeys ---- */
@@ -1064,6 +1231,17 @@ $('installSheet').addEventListener('click', e => { if(e.target === $('installShe
 
 // Read-only handle for troubleshooting from the browser console
 window.fieldlineDebug = { get rec(){return rec;}, get flight(){return flight;}, get sim(){return !!sim;}, get tracks(){return tracks;}, trackStats, persistRec:()=>persistRec(true) };
+
+function fixViewportGap(){
+  let gap=0;
+  if(navigator.standalone===true){
+    const portrait = innerHeight > innerWidth, full = portrait ? Math.max(screen.width,screen.height) : Math.min(screen.width,screen.height);
+    const g = Math.round(full - innerHeight);
+    if(g>=10 && g<=140) gap=g;                     // a keyboard or a split view is bigger than this: leave those alone
+  }
+  document.documentElement.style.setProperty('--gapfix', gap+'px');
+}
+fixViewportGap(); addEventListener('resize', fixViewportGap); addEventListener('orientationchange', ()=>setTimeout(fixViewportGap,300));
 
 initMap();
 if(!standalone && !lsGet('fieldline.web', false)) showWelcome(); else startGPSOnce();
