@@ -276,3 +276,7 @@ form.row button.primary{flex:0 0 auto;padding:12px 18px}
 #pTracks td.a{grid-column:1/-1;text-align:left;display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
 #pTracks td.a button{margin-left:0}
 #pTracks small.lib{font-weight:400}
+
+/* If an iPhone home-screen app leaves a strip below the fixed panels, it shows the page background:
+   colour it like the panel so it reads as part of the panel */
+html,body{background:var(--panel)}

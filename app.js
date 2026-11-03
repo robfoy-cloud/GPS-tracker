@@ -1518,10 +1518,11 @@ function fixViewportGap(){
     const portrait = innerHeight > innerWidth, full = portrait ? Math.max(screen.width,screen.height) : Math.min(screen.width,screen.height);
     const box = Math.min(probe.getBoundingClientRect().height, innerHeight, document.documentElement.clientHeight||innerHeight);
     const g = Math.round(full - box);
-    if(g>=10 && g<=140) gap=g;                     // a keyboard or a split view is bigger than this: leave those alone
-    fixViewportGap.info={full, probe:Math.round(probe.getBoundingClientRect().height), inner:innerHeight, client:document.documentElement.clientHeight, vv:Math.round(visualViewport?.height||0), gap};
+    // Measured for diagnostics only. Moving things down by it pushed the panel off the screen when the strip
+    // wasn't there, so nothing is moved; the page behind the strip is coloured like the panel instead.
+    fixViewportGap.info={full, probe:Math.round(probe.getBoundingClientRect().height), inner:innerHeight, client:document.documentElement.clientHeight, vv:Math.round(visualViewport?.height||0), shortBy:g};
   }
-  document.documentElement.style.setProperty('--gapfix', gap+'px');
+  document.documentElement.style.setProperty('--gapfix', '0px');
 }
 fixViewportGap(); addEventListener('resize', fixViewportGap); addEventListener('orientationchange', ()=>setTimeout(fixViewportGap,300));
 
