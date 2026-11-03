@@ -727,9 +727,9 @@ function styleExtras(){
 }
 const xyz = (tpl,z,x,y) => tpl.replace('{z}',z).replace('{x}',x).replace('{y}',y);
 const detail = () => (document.querySelector('input[name="detail"]:checked')||{}).value || 'overview';
-function tileList(b){
+function tileList(b, det){
   const tj=lsGet(K.tj,null); if(!tj) return [];
-  const tpl=tj.tiles[0], maxz=Math.min(tj.maxzoom||14, DETAIL[detail()].z), out=[];
+  const tpl=tj.tiles[0], maxz=Math.min(tj.maxzoom||14, DETAIL[det||detail()].z), out=[];
   for(let z=0; z<=maxz; z++){
     const x0=lon2x(b.getWest(),z), x1=lon2x(b.getEast(),z), y0=lat2y(b.getNorth(),z), y1=lat2y(b.getSouth(),z);
     if((x1-x0+1)*(y1-y0+1)+out.length > MAX_TILES*2) return null;
@@ -1165,14 +1165,41 @@ function renderAreas(){
     const go=document.createElement('button'); go.textContent='Go to';
     go.textContent=a.journey?'Show route':'Go to';
     go.onclick=()=>{ if(a.journey) showJourney({from:a.from,to:a.to,route:a.route||null,label:a.label||null}); setFollow(false); $('pOffline').hidden=true; map?.fitBounds([[a.b[0],a.b[1]],[a.b[2],a.b[3]]],{padding:{top:90,bottom:(parseInt(getComputedStyle(document.documentElement).getPropertyValue('--dock-h'))||200)+40,left:40,right:40},maxZoom:14}); };
-    li.append(t,go);
+    const btns=document.createElement('div'); btns.className='a-btns'; btns.appendChild(go);
     if(a.journey && a.total && a.saved<a.total){
       const fin=document.createElement('button'); fin.textContent='Finish saving';
       fin.onclick=()=>{ setPlace('from',a.from,true); setPlace('to',a.to,true); routeInfo=a.route?{route:a.route,label:a.label}:null; $('bSaveJourney').click(); };
-      li.appendChild(fin);
+      btns.appendChild(fin);
     }
+    const del=document.createElement('button'); del.textContent=pendingAreaDelete===a.date?'Tap again to delete':'Delete'; if(pendingAreaDelete===a.date) del.className='danger';
+    del.onclick=()=>deleteArea(a);
+    btns.appendChild(del);
+    li.append(t,btns);
     ul.appendChild(li);
   }
+}
+/* Delete one saved map. Saved maps overlap (two journeys from Malta share Malta's maps), so only the map
+   pieces that no other saved map needs are removed. */
+let pendingAreaDelete=null;
+function areaUrls(a){
+  if(a.journey){ const p=journeyTiles(a.from,a.to,a.route||null); return p?p.urls:[]; }
+  const list=tileList(new maplibregl.LngLatBounds([a.b[0],a.b[1]],[a.b[2],a.b[3]]), DETAIL[a.detail]?a.detail:'street')||[];
+  const ex=styleExtras(), urls=list.map(t=>t.u);
+  for(const t of list) for(const r of ex.raster) if(t.z<=r.maxz) urls.push(xyz(r.tpl,t.z,t.x,t.y));
+  return urls.concat(ex.assets);
+}
+async function deleteArea(a){
+  if(saving){ toast('Wait until saving has finished.'); return; }
+  if(pendingAreaDelete!==a.date){ pendingAreaDelete=a.date; renderAreas(); setTimeout(()=>{ if(pendingAreaDelete===a.date){ pendingAreaDelete=null; renderAreas(); } },4000); return; }
+  pendingAreaDelete=null;
+  const areas=lsGet(K.areas,[]), rest=areas.filter(x=>x.date!==a.date);
+  const keep=new Set(); for(const x of rest) for(const u of areaUrls(x)) keep.add(u);
+  let freed=0;
+  try{ const c=await openCache(); if(c) for(const u of areaUrls(a)) if(!keep.has(u) && await c.delete(u)) freed++; }catch(e){}
+  lsSet(K.areas,rest);
+  if(a.journey && journey && samePlace(journey.from,a.from) && samePlace(journey.to,a.to)){ journey=null; lsSet('fieldline.journey',null); drawJourney(); readouts(); }
+  renderAreas(); estimate();
+  toast('Deleted '+(a.journey?a.name:'saved area')+(freed?' ('+freed.toLocaleString()+' map pieces removed'+(rest.length?'; pieces other saved maps use are kept':'')+')':'')+'.');
 }
 let clearArm=false;
 $('bClear').onclick=async()=>{
