@@ -137,7 +137,7 @@ async function initMap(){
   let cfg;
   try { cfg = await loadStyle(); }
   catch(e){
-    banner('<b>The map needs a connection the first time it opens.</b> Connect once, let the map load, then save your area under <b>Offline map</b>. Your position still shows below.');
+    banner('<b>The map needs a connection the first time it opens.</b> Connect once, let the map load, then save your journey under <b>Journey</b>. Your position still shows below.');
     status('search','No map yet');
     return;
   }
@@ -274,7 +274,7 @@ function drawSaved(){ if(mapReady) map.getSource('saved').setData(shown?line(sho
 
 function setFollow(on){
   follow = on; $('bFollow').setAttribute('aria-pressed', String(on));
-  if(on && last && map) map.easeTo({center:[last.lon,last.lat], zoom:Math.max(map.getZoom(),(last.spd||0)>40?6:15), duration:500});
+  if(on && last && map && !replay) map.easeTo({center:[last.lon,last.lat], zoom:Math.max(map.getZoom(),(last.spd||0)>40?6:15), duration:500});
 }
 $('bFollow').onclick = () => { if(!last){ toast('No position fix yet.'); return; } setFollow(true); };
 
@@ -330,7 +330,9 @@ function onPos(pos){
     }
   }
   if(map){
-    if(firstFix){ firstFix=false; map.jumpTo({center:[p.lon,p.lat], zoom:Math.max(map.getZoom(),(p.spd||0)>40?7:16)}); }
+    // During a replay the camera belongs to the replay: live fixes must not pull it back to where you are
+    if(replay){ /* keep following the replay */ }
+    else if(firstFix){ firstFix=false; map.jumpTo({center:[p.lon,p.lat], zoom:Math.max(map.getZoom(),(p.spd||0)>40?7:16)}); }
     else if(follow) map.easeTo({center:[p.lon,p.lat], duration:600});
   }
   if(p.acc<=250){ speedHist.push({lat:p.lat,lon:p.lon,t:p.t}); while(speedHist.length && p.t-speedHist[0].t>300000) speedHist.shift(); }
@@ -560,13 +562,14 @@ function flightCheck(p){
     if(climbed || spd > 70){ flight = {phase:'air', takeoff: wall}; slowSince = null; saveFlight();
       if(!rec && autoRecOn()){ startRecording(true, recent.slice()); toast('Airborne: flight timer started and recording your track.'); }
       else toast('Airborne: flight timer started.');
-      if(map && follow && map.getZoom() > 10) map.jumpTo({center:[p.lon,p.lat], zoom:8}); }
+      if(map && follow && !replay && map.getZoom() > 10) map.jumpTo({center:[p.lon,p.lat], zoom:8}); }
   } else {
     if(spd < 20){ slowSince ??= gt; if(gt - slowSince > 30000){ flight = {phase:'landed', takeoff: flight.takeoff, landing: sim ? slowSince : wall - (gt - slowSince)}; saveFlight(); groundAlt = p.ele; groundAt = gt;
       let msg='Landed. Flight time '+fmtT((flight.landing-flight.takeoff)/1000)+'.';
       if(rec && rec.auto){
         const j=journey, nm=(j&&j.from&&j.to ? (j.from.code||j.from.name)+' → '+(j.to.code||j.to.name) : 'Flight')+(sim?' (simulated)':'');
         const t=stopRecording(true, nm);
+        if(t && !sim && shareOn()){ t.lib='queued'; lsSet(K.tracks,tracks); setTimeout(shareQueued,1500); }
         if(t) msg+=' Track saved: '+fmtDist(trackStats(t.pts).d)+'.';
       }
       toast(msg); } }
@@ -643,6 +646,9 @@ $('tAutoRec').onchange = e => { lsSet('fieldline.autoRec', e.target.checked); to
 function openSheet(id){ document.querySelectorAll('.sheet').forEach(s=>s.hidden = s.id!==id); if(id==='pOffline'){estimate();renderAreas();planJourney();} if(id==='pTracks') renderTracks(); }
 document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>b.closest('.sheet').hidden=true);
 $('bTracks').onclick = () => openSheet('pTracks');
+$('bSettings').onclick = () => { openSheet('pSettings'); renderAccount(); renderLibInfo(); showVersion(); $('sMetric').classList.toggle('sel-btn',units==='metric'); $('sImperial').classList.toggle('sel-btn',units==='imperial'); };
+$('sMetric').onclick=()=>{ setUnits('metric'); $('bSettings').onclick(); };
+$('sImperial').onclick=()=>{ setUnits('imperial'); $('bSettings').onclick(); };
 $('bOffline').onclick = () => openSheet('pOffline');
 
 /* ---------------- tracks list + GPX ---------------- */
@@ -652,10 +658,13 @@ function renderTracks(){
   for(const t of tracks){
     const st=trackStats(t.pts), tr=document.createElement('tr'); if(shown===t) tr.className='sel';
     const td=(txt,cls)=>{const c=document.createElement('td');if(cls)c.className=cls;c.textContent=txt;tr.appendChild(c);return c;};
-    td(t.name); td(fmtDist(st.d, st.d<100000?1:0),'n'); td(fmtT(st.mv),'n');
+    const nm=td(t.name);
+    if(t.lib){ const s2=document.createElement('small'); s2.className='lib'; s2.textContent=t.lib==='done'?'Shared to the route library':t.lib==='queued'?'Waiting to share':t.lib==='skip'?'Not shared: '+(t.libWhy||''):''; nm.appendChild(document.createElement('br')); nm.appendChild(s2); }
+    td(fmtDist(st.d, st.d<100000?1:0),'n'); td(fmtT(st.mv),'n');
     const a=td('','a');
     const mk=(l,fn)=>{const b=document.createElement('button');b.textContent=l;b.onclick=fn;a.appendChild(b);};
     mk('Replay',()=>{ $('pTracks').hidden=true; startReplay(t); });
+    if(!t.lib && !(t.name||'').includes('(simulated)') && st.d>30000) mk('Share',()=>{ t.lib='queued'; lsSet(K.tracks,tracks); renderTracks(); if(authOn&&!access) toast('Sign in to share.'); shareQueued(); });
     mk('Show',()=>{shown=t;drawSaved();renderTracks();$('pTracks').hidden=true;fitTrack(t);});
     mk('GPX',()=>exportGPX(t));
     mk(t._c?'Confirm':'Delete',()=>{
@@ -842,7 +851,7 @@ $('bDiag').onclick=async()=>{
   const out=$('diagOut'); out.hidden=false; out.value='Collecting…';
   const lines=[], tj=lsGet(K.tj,null);
   lines.push('Flightroute diagnostics '+new Date().toISOString());
-  lines.push('App: '+(document.querySelector('.ver')?.textContent||'?')+' | preview '+preview+' | online '+navigator.onLine);
+  lines.push('App: '+($('sVer').textContent||'?')+' | signed in '+(authOn?(access?access.email:'no'):'(sign-in off)')+' | library '+library.length+' | preview '+preview+' | online '+navigator.onLine);
   lines.push('Browser: '+navigator.userAgent);
   lines.push('Map data: '+(tj?tj.tiles[0]:'none')+' maxzoom '+(tj?.maxzoom??'?'));
   try{ const e=await navigator.storage.estimate(); lines.push('Storage used '+fmtMB(e.usage||0)+' of '+fmtMB(e.quota||0)+' | persisted '+(await navigator.storage.persisted?.())); }catch(e){ lines.push('Storage: n/a'); }
@@ -933,6 +942,18 @@ function matchSavedRoute(){
     else if(!best && near(a,J.to)&&near(b,J.from)){ best={t,when}; reversed=true; }
   }
   el.hidden=false;
+  if(!best){
+    // the public route library: flights other people (or your other devices) shared
+    let lb=null, lrev=false;
+    for(const e of library){ const a={lon:e.route[0][0],lat:e.route[0][1]}, b={lon:e.route[e.route.length-1][0],lat:e.route[e.route.length-1][1]};
+      if(near(a,J.from)&&near(b,J.to)){ lb=e; lrev=false; break; } if(!lb && near(a,J.to)&&near(b,J.from)){ lb=e; lrev=true; } }
+    if(lb){
+      let pts=lb.route.map(([lon,lat])=>({lat,lon})); if(lrev) pts.reverse(); pts=thin([J.from,...pts,J.to]);
+      routeInfo={route:pts.map(p=>[+p.lon.toFixed(4),+p.lat.toFixed(4)]), label:'route library '+lb.from+' → '+lb.to+(lrev?' (flown the other way)':'')};
+      el.textContent='Route: following a flight in the route library ('+lb.from+' → '+lb.to+(lrev?', flown the other way':'')+'), '+fmtDist(routeLength(pts))+'. Real routes vary a little from day to day.';
+      $('bStraight').hidden=false; planJourney(); previewRoute(); return;
+    }
+  }
   if(!best){ el.textContent='Route: shortest path. To follow a real path, import a GPX of this flight in Tracks (or record it once); it will be used next time.'; planJourney(); previewRoute(); return; }
   let pts=best.t.pts.map(p=>({lat:p.lat,lon:p.lon})); if(reversed) pts.reverse();
   pts=thin([J.from,...pts,J.to]);
@@ -1175,16 +1196,226 @@ $('tPreview').onchange=e=>{
 { const t=lsGet('fieldline.toast',null); if(t){ lsSet('fieldline.toast',null); setTimeout(()=>toast(t),600); } }
 addEventListener('online',net); addEventListener('offline',net); net();
 new ResizeObserver(()=>document.documentElement.style.setProperty('--dock-h',$('dock').offsetHeight+'px')).observe($('dock'));
+// The banner sits under the top bar, however many lines the top bar wraps onto
+new ResizeObserver(()=>{ const b=document.querySelector('.topbar').getBoundingClientRect().bottom; document.documentElement.style.setProperty('--top-h',Math.round(b)+'px'); }).observe(document.querySelector('.topbar'));
 
-if('serviceWorker' in navigator){
-  navigator.serviceWorker.register('sw.js',{updateViaCache:'none'}).then(reg=>{
-    // Check for a new version on start and whenever the app comes back to the front.
-    reg.update().catch(()=>{});
-    document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible') reg.update().catch(()=>{}); });
-  }).catch(()=>{});
-  // A new version took over: reload once to show it, unless a track is being recorded.
+/* ---------------- updates ----------------
+   A new version downloads in the background and waits. The app shows "Version N is ready · Update";
+   tapping Update switches to it and reloads. Settings has Check for updates. */
+let swReg=null, appVersion=null, waitingWorker=null, waitingVersion=null;
+function askVersion(worker){
+  return new Promise(res=>{
+    if(!worker) return res(null);
+    const ch=new MessageChannel(), t=setTimeout(()=>res(null),3000);
+    ch.port1.onmessage=e=>{ clearTimeout(t); res(e.data&&e.data.version||null); };
+    try{ worker.postMessage({type:'GET_VERSION'},[ch.port2]); }catch(e){ clearTimeout(t); res(null); }
+  });
+}
+function showVersion(){ const v=appVersion?'Flightroute version '+appVersion:'Flightroute'; $('sVer').textContent=v+(waitingVersion?' · version '+waitingVersion+' is ready':''); }
+async function offerUpdate(worker){
+  waitingWorker=worker; waitingVersion=await askVersion(worker);
+  const el=$('update'); el.textContent='';
+  const sp=document.createElement('span'); sp.textContent=waitingVersion?'Version '+waitingVersion+' ready':'New version ready';
+  const b=document.createElement('button'); b.className='primary'; b.textContent='Update'; b.onclick=applyUpdate;
+  el.append(sp,b); el.hidden=false; showVersion();
+}
+function applyUpdate(){
+  if(!waitingWorker) return;
+  persistRec(true);                                   // a recording in progress carries on after the reload
+  lsSet('fieldline.justUpdated', waitingVersion||'new');
+  $('update').textContent='Updating…';
+  waitingWorker.postMessage({type:'SKIP_WAITING'});
+  setTimeout(()=>location.reload(),4000);             // in case the switch-over event never arrives
+}
+function watchInstalling(w){ return new Promise(res=>{ if(!w||w.state!=='installing') return res(); w.addEventListener('statechange',()=>{ if(w.state!=='installing') res(); }); }); }
+async function checkForUpdate(manual){
+  if(!swReg){ if(manual) toast('Updates work in the installed app, opened from its web address.'); return; }
+  if(manual){ $('bCheckUpdate').disabled=true; $('bCheckUpdate').textContent='Checking…'; }
+  try{ await swReg.update(); }catch(e){ if(manual) toast("Couldn't check for updates. Are you online?"); }
+  await watchInstalling(swReg.installing);
+  if(manual){ $('bCheckUpdate').disabled=false; $('bCheckUpdate').textContent='Check for updates'; }
+  if(swReg.waiting && navigator.serviceWorker.controller) offerUpdate(swReg.waiting);
+  else if(manual) toast("You're on the latest version"+(appVersion?' ('+appVersion+')':'')+'.');
+}
+if('serviceWorker' in navigator && window.isSecureContext){
   let reloaded=false;
-  navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(!reloaded && !rec && navigator.serviceWorker.controller){ reloaded=true; location.reload(); } });
+  navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(!reloaded && (lsGet('fieldline.justUpdated',null) || !appVersion)){ reloaded=true; location.reload(); } });
+  navigator.serviceWorker.register('sw.js',{updateViaCache:'none'}).then(async reg=>{
+    swReg=reg;
+    appVersion=await askVersion(navigator.serviceWorker.controller||reg.active); showVersion();
+    if(reg.waiting && navigator.serviceWorker.controller) offerUpdate(reg.waiting);
+    reg.addEventListener('updatefound',()=>{ const w=reg.installing; w&&w.addEventListener('statechange',()=>{ if(w.state==='installed' && navigator.serviceWorker.controller) offerUpdate(w); }); });
+    checkForUpdate(false);
+  }).catch(()=>{});
+  // Home-screen apps resume rather than reload, so look for updates whenever the app comes back
+  document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible') checkForUpdate(false); });
+}
+$('bCheckUpdate').onclick=()=>checkForUpdate(true);
+{ const v=lsGet('fieldline.justUpdated',null); if(v){ lsSet('fieldline.justUpdated',null); setTimeout(()=>toast(v==='new'?'Success! Updated to the latest version.':'Success! Updated to version '+v+'.'),900); } }
+
+/* ---------------- sign-in (email code, invite-only; as in Learn Spanish) ---------------- */
+const CFG = window.FR_CONFIG || {};
+const authOn = !!(CFG.supabaseUrl && CFG.supabaseKey && window.supabase);
+const AUTH_KEY = 'flightroute.auth';
+let SB=null, access=lsGet('fieldline.access',null), gateEmail='', confirmSignOut=false, people=null, pendingRemove=null;
+if(authOn) SB=window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseKey, {auth:{persistSession:true, autoRefreshToken:true, detectSessionInUrl:false, storageKey:AUTH_KEY}});
+function hasStoredSession(){ try{ return !!localStorage.getItem(AUTH_KEY); }catch(e){ return false; } }
+function signedIn(){ return !authOn || !!(access && hasStoredSession()); }
+async function authToken(){ if(!authOn) return null; try{ const {data}=await SB.auth.getSession(); return data.session?data.session.access_token:null; }catch(e){ return null; } }
+function gateMsg(t, good){ const m=$('gMsg'); m.hidden=!t; m.textContent=t||''; m.classList.toggle('good',!!good); }
+function authError(e){
+  const m=String((e&&e.message)||e||'');
+  if(/rate|too many|security purposes/i.test(m)) return 'Too many codes asked for. Wait a minute, then try again.';
+  if(/expired|invalid|token/i.test(m)) return "That code didn't work. Check it, or send a new one.";
+  if(/fetch|network|load failed/i.test(m)) return 'No connection. You need the internet to sign in.';
+  if(/fr_can_sign_in|function|PGRST202/i.test(m)) return "Sign-in isn't fully set up yet (the access list is missing).";
+  return m||'Something went wrong. Try again.';
+}
+function showGate(step){
+  $('gate').hidden=false; $('gSend').hidden=step==='code'; $('gVerify').hidden=step!=='code';
+  if(step==='code'){ $('gTo').textContent=gateEmail; $('gCode').value=''; setTimeout(()=>$('gCode').focus(),100); } else setTimeout(()=>$('gEmail').focus(),100);
+}
+async function sendCode(again){
+  const email=$('gEmail').value.trim().toLowerCase() || gateEmail;
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ gateMsg('Enter your full email address.'); return; }
+  if(!navigator.onLine){ gateMsg('No connection. You need the internet to sign in.'); return; }
+  $('gSendBtn').disabled=true; gateMsg('');
+  try{
+    const {data:ok, error:e1}=await SB.rpc('fr_can_sign_in',{p_email:email});
+    if(e1) throw e1;
+    if(!ok){ gateMsg("This email doesn't have access yet. Ask whoever invited you to add it."); return; }
+    const {error}=await SB.auth.signInWithOtp({email, options:{shouldCreateUser:true}});
+    if(error) throw error;
+    gateEmail=email; showGate('code'); gateMsg(again?'A new code is on its way.':'', true);
+  }catch(e){ gateMsg(authError(e)); }
+  finally{ $('gSendBtn').disabled=false; }
+}
+async function verifyCode(){
+  const code=$('gCode').value.replace(/\D/g,'');
+  if(code.length<6){ gateMsg('Enter the code from the email.'); return; }
+  $('gVerifyBtn').disabled=true; gateMsg('');
+  try{
+    const {error}=await SB.auth.verifyOtp({email:gateEmail, token:code, type:'email'});
+    if(error) throw error;
+    if(await checkAccess(true)){ $('gate').hidden=true; toast('Signed in. Welcome aboard.'); enterApp(); }
+  }catch(e){ gateMsg(authError(e)); }
+  finally{ $('gVerifyBtn').disabled=false; }
+}
+$('gSend').addEventListener('submit',e=>{ e.preventDefault(); sendCode(false); });
+$('gVerify').addEventListener('submit',e=>{ e.preventDefault(); verifyCode(); });
+$('gResend').onclick=()=>sendCode(true);
+$('gBack').onclick=()=>{ gateMsg(''); showGate('email'); };
+/* Is this account on the list? Offline, the last answer stands. */
+async function checkAccess(fromSignIn){
+  if(!authOn || !hasStoredSession() || !navigator.onLine) return !!access;
+  try{
+    const [{data:ok, error:e1},{data:admin}]=await Promise.all([SB.rpc('fr_is_allowed'), SB.rpc('fr_is_admin')]);
+    if(e1) throw e1;
+    if(!ok){
+      access=null; lsSet('fieldline.access',null);
+      try{ await SB.auth.signOut({scope:'local'}); }catch(e){}
+      showGate('email'); gateMsg(fromSignIn?"This email doesn't have access.":'Your access to Flightroute has been removed. Ask whoever invited you if that\'s a mistake.');
+      return false;
+    }
+    const {data:u}=await SB.auth.getUser();
+    access={email:(u&&u.user&&u.user.email||'').toLowerCase(), admin:!!admin}; lsSet('fieldline.access',access);
+    renderAccount(); return true;
+  }catch(e){
+    if(/JWT|jwt|session|401/.test(String(e&&(e.message||e.code)))){ access=null; lsSet('fieldline.access',null); showGate('email'); return false; }
+    return !!access;                                   // network trouble: keep the last answer
+  }
+}
+async function signOut(){
+  confirmSignOut=false; access=null; lsSet('fieldline.access',null); people=null;
+  try{ await SB.auth.signOut({scope:'local'}); }catch(e){}
+  try{ localStorage.removeItem(AUTH_KEY); }catch(e){}
+  $('pSettings').hidden=true; showGate('email'); gateMsg('Signed out.', true);
+}
+/* Settings: account, and for admins the list of people who can use Flightroute */
+function renderAccount(){
+  const box=$('sAccount'); box.textContent='';
+  if(!authOn){ const p=document.createElement('p'); p.className='hint'; p.textContent='Sign-in is not switched on, so anyone with the link can use Flightroute.'; box.appendChild(p); return; }
+  if(!access) return;
+  const h=document.createElement('h3'); h.textContent='Account'; box.appendChild(h);
+  const p=document.createElement('p'); p.className='hint'; p.textContent='Signed in as '+access.email+(access.admin?' (admin)':''); box.appendChild(p);
+  const row=document.createElement('div'); row.className='row';
+  const b=document.createElement('button'); b.textContent=confirmSignOut?'Yes, sign out':'Sign out'; if(confirmSignOut) b.className='danger';
+  b.onclick=()=>{ if(!confirmSignOut){ confirmSignOut=true; renderAccount(); setTimeout(()=>{ confirmSignOut=false; renderAccount(); },4000); } else signOut(); };
+  row.appendChild(b); box.appendChild(row);
+  if(access.admin) renderPeople(box);
+}
+async function renderPeople(box){
+  const h=document.createElement('h3'); h.textContent='People who can use Flightroute'; box.appendChild(h);
+  const ul=document.createElement('ul'); ul.className='areas'; box.appendChild(ul);
+  const msg=document.createElement('p'); msg.className='hint';
+  const say=(t,bad)=>{ msg.textContent=t; msg.classList.toggle('warn',!!bad); };
+  if(!navigator.onLine){ say('Connect to the internet to see and change the list.',true); box.appendChild(msg); return; }
+  if(people===null){ const {data,error}=await SB.from('fr_allowed_emails').select('email,is_admin,added_at').order('email'); people=error?[]:data; if(error) say(authError(error),true); }
+  for(const p of people){
+    const li=document.createElement('li'); const who=document.createElement('div'); who.textContent=p.email+(p.is_admin?' · admin':'')+(p.email===access.email?' · you':''); li.appendChild(who);
+    if(p.email!==access.email){ const rm=document.createElement('button'); rm.textContent=pendingRemove===p.email?'Tap again to remove':'Remove'; if(pendingRemove===p.email) rm.className='danger';
+      rm.onclick=async()=>{ if(pendingRemove!==p.email){ pendingRemove=p.email; rerender(); return; } pendingRemove=null;
+        const {error}=await SB.from('fr_allowed_emails').delete().eq('email',p.email); people=null; rerender(error?authError(error):'Removed '+p.email+'.'); };
+      li.appendChild(rm); }
+    ul.appendChild(li);
+  }
+  const f=document.createElement('form'); f.className='row';
+  const inp=document.createElement('input'); inp.type='email'; inp.placeholder='friend@example.com'; inp.autocapitalize='none'; inp.spellcheck=false; inp.id='pEmail'; inp.setAttribute('aria-label','Email to add'); inp.className='p-in';
+  const add=document.createElement('button'); add.className='primary'; add.type='submit'; add.textContent='Add';
+  f.append(inp,add); box.appendChild(f); box.appendChild(msg);
+  const note=document.createElement('p'); note.className='hint'; note.textContent='They sign in with a code sent to that email. Removing someone locks them out the next time their app goes online.'; box.appendChild(note);
+  f.onsubmit=async e=>{ e.preventDefault(); const email=inp.value.trim().toLowerCase();
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ say('Enter a full email address.',true); return; }
+    const {error}=await SB.from('fr_allowed_emails').insert({email, added_by:access.email}); people=null;
+    rerender(error?(error.code==='23505'?email+' is already on the list.':authError(error)):'Added '+email+'. They can sign in now.'); };
+  function rerender(t){ renderAccount(); if(t) toast(t); }
+}
+if(authOn){
+  SB.auth.onAuthStateChange(ev=>{ if(ev==='SIGNED_OUT' && access){ access=null; lsSet('fieldline.access',null); showGate('email'); } });
+  addEventListener('online',()=>{ checkAccess(false).then(ok=>{ if(ok) shareQueued(); }); });
+  document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible' && access) checkAccess(false).then(ok=>{ if(ok) shareQueued(); }); });
+}
+
+/* ---------------- route library (public, in the GitHub repo) ----------------
+   Flights recorded automatically are shared (path and heights, no times) to routes/ in the repo through
+   the worker; routes/index.json lists them and the planner uses them as real routes. */
+let library = lsGet('fieldline.library', []);
+async function loadLibrary(){
+  if(!navigator.onLine) return;
+  try{ const r=await fetch('routes/index.json',{cache:'no-store'}); if(!r.ok) return; const list=await r.json();
+    if(Array.isArray(list)){ library=list.filter(e=>Array.isArray(e.route)&&e.route.length>1); lsSet('fieldline.library',library); } }catch(e){}
+}
+const shareOn = () => lsGet('fieldline.share', true) !== false;
+$('tShare').checked = shareOn();
+$('tShare').onchange = e => { lsSet('fieldline.share', e.target.checked); if(e.target.checked) shareQueued(); renderLibInfo(); };
+function nearestAirport(p, within){
+  if(!airports) return null; let best=null, bd=within;
+  for(const a of airports){ const d=hav(p,a); if(d<bd){ bd=d; best=a; } } return best;
+}
+function renderLibInfo(){
+  const q=tracks.filter(t=>t.lib==='queued').length, d=tracks.filter(t=>t.lib==='done').length;
+  $('sLib').textContent=library.length+' route'+(library.length===1?'':'s')+' in the library'+(d?', '+d+' shared from this device':'')+(q?'. '+q+' waiting to share'+(authOn&&!access?' (sign in first)':!navigator.onLine?' (when online)':''):'')+'.';
+}
+let sharing=false;
+async function shareQueued(){
+  if(sharing || !shareOn() || !navigator.onLine || (authOn && !access)) return;
+  const queue=tracks.filter(t=>t.lib==='queued'); if(!queue.length) return;
+  sharing=true;
+  try{
+    await loadAirports();
+    for(const t of queue){
+      const a=nearestAirport(t.pts[0],20000), b=nearestAirport(t.pts[t.pts.length-1],20000);
+      if(!a||!b||a.iata===b.iata){ t.lib='skip'; t.libWhy='no airport at both ends'; continue; }
+      const tok=await authToken();
+      const r=await fetch('/api/tracks',{method:'POST', headers:Object.assign({'content-type':'application/json'}, tok?{authorization:'Bearer '+tok}:{}),
+        body:JSON.stringify({id:String(t.id).toLowerCase().replace(/[^a-z0-9-]/g,'').slice(0,40).padEnd(6,'0'), from:a.iata, to:b.iata, pts:t.pts.map(p=>[p.lon,p.lat,p.ele??null])})});
+      const j=await r.json().catch(()=>({}));
+      if(r.ok){ t.lib='done'; t.libFile=j.file; toast('Shared '+a.iata+' → '+b.iata+' to the route library.'); }
+      else if(r.status===400){ t.lib='skip'; t.libWhy=j.error||'not accepted'; }
+      else { t.libWhy=j.error||('error '+r.status); break; }          // try again later
+    }
+  }catch(e){ /* offline or server trouble: try again later */ }
+  finally{ sharing=false; lsSet(K.tracks,tracks); renderTracks(); renderLibInfo(); }
 }
 
 /* ---------------- welcome page and install ---------------- */
@@ -1197,11 +1428,12 @@ let installPrompt = null, gpsStarted = false;
 addEventListener('beforeinstallprompt', e => { e.preventDefault(); installPrompt = e; });
 addEventListener('appinstalled', () => { installPrompt = null; $('wInstall').textContent = 'Installed'; $('wInstall').disabled = true; });
 function startGPSOnce(){ if(!gpsStarted && !sim){ gpsStarted = true; startGPS(); } }
+function enterApp(){ if(authOn && !signedIn()){ showGate('email'); return; } $('gate').hidden=true; startGPSOnce(); loadLibrary().then(renderLibInfo); if(authOn) checkAccess(false).then(ok=>{ if(ok) shareQueued(); }); else shareQueued(); }
 function showWelcome(){
   $('welcome').hidden = false; $('welcome').scrollTop = 0;
   if(standalone){ $('wInstall').textContent = 'Installed'; $('wInstall').disabled = true; $('wWeb').textContent = 'Open map'; }
 }
-$('wWeb').onclick = () => { lsSet('fieldline.web', true); $('welcome').hidden = true; startGPSOnce(); };
+$('wWeb').onclick = () => { lsSet('fieldline.web', true); $('welcome').hidden = true; enterApp(); };
 $('bAbout').onclick = () => { $('pOffline').hidden = true; showWelcome(); };
 $('wInstall').onclick = async () => {
   if(installPrompt){                                  // Chrome, Edge, Android: the browser's own install prompt
@@ -1244,6 +1476,6 @@ function fixViewportGap(){
 fixViewportGap(); addEventListener('resize', fixViewportGap); addEventListener('orientationchange', ()=>setTimeout(fixViewportGap,300));
 
 initMap();
-if(!standalone && !lsGet('fieldline.web', false)) showWelcome(); else startGPSOnce();
+if(!standalone && !lsGet('fieldline.web', false)) showWelcome(); else enterApp();
 readouts();
 })();

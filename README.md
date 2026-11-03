@@ -20,6 +20,9 @@ Flightroute is a web app that shows your position on a map and keeps working wit
 - **Replay** any saved or imported track: play/pause, speed (10× to 1200×), scrub, follow; shows speed, altitude, distance flown and clock time
 - **Saved tracks as routes**: when planning, a saved or imported track that starts near From and ends near To is used as the route (line, saved maps, distance to go, arrival estimate, simulator); otherwise the shortest path
 - Exports tracks as GPX (share sheet on iPhone) and imports GPX files
+- **Sign-in** (once switched on): invite-only, with a 6-digit code sent by email and no passwords. Admins manage who can use Flightroute in **Settings › People**. Works offline once signed in. See `supabase/SETUP.md`
+- **Route library**: automatically recorded flights are shared (path and heights only, no times, dates or names) to `routes/` in this public repository, listed in `routes/index.json`; the planner uses them as real routes for anyone planning the same trip. Can be turned off in Settings
+- **Updates**: a new version downloads in the background and the app shows **Update**; Settings shows the version and has **Check for updates**
 - Installs to the home screen and opens offline. Opening the site in a browser shows a store-style welcome page with **Install** (the browser's own install prompt on Android and desktop Chrome; a three-step guide on iPhone, iPad and Mac Safari, which don't allow one-tap install) and **Web version**
 
 ## Using it on iPhone
@@ -41,7 +44,9 @@ Limits: iOS stops web apps from reading GPS while the screen is locked or anothe
 | `app.css` | Styles |
 | `app.js` | Map, GPS, recording, offline tiles, GPX |
 | `sw.js` | Service worker that keeps the app available offline |
-| `wrangler.jsonc`, `.assetsignore` | Cloudflare deployment: serves the folder as static files, leaving out repository files |
+| `worker.js`, `wrangler.jsonc`, `.assetsignore` | Cloudflare Worker: serves the app's files, and `/api/tracks`, which adds a shared route to the library through the GitHub API (signed-in, allowed users only) |
+| `config.js`, `vendor/supabase.js`, `supabase/` | Sign-in settings, the Supabase client, and the setup guide and SQL |
+| `routes/` | The public route library: one GPX per shared flight and `index.json` |
 | `manifest.webmanifest`, `icons/` | Home screen install |
 | `screenshots/` | Welcome page and install screenshots |
 | `airports.json` | Airports with scheduled flights, from [OurAirports](https://ourairports.com/data/) (public domain) |

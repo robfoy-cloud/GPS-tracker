@@ -237,3 +237,31 @@ tr.sel td{background:color-mix(in srgb,var(--accent) 10%,transparent)}
 #map{bottom:calc(-1 * var(--gapfix,0px))}
 .dock,.replay,.sheet{bottom:calc(-1 * var(--gapfix,0px))}
 .dock .sub{min-height:14px}
+
+/* ---------- settings, updates, sign-in (v26) ---------- */
+.pill.gear{padding:6px 8px;cursor:pointer;color:var(--fg)}
+.pill.update{border-color:var(--accent);padding:3px 3px 3px 12px;gap:8px;font:600 13px var(--body);color:var(--fg)}
+.pill.update button{padding:6px 12px;border-radius:999px;font-size:13px}
+.sel-btn{border-color:var(--accent);color:var(--accent)}
+.hint.warn{color:var(--bad)!important}
+small.lib{color:var(--muted);font-size:11.5px}
+.p-in{flex:1;min-width:0;font:16px var(--body);padding:10px 12px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg)}
+.gate{position:fixed;inset:0;z-index:35;background:var(--bg);display:flex;align-items:center;justify-content:center;
+  padding:calc(20px + env(safe-area-inset-top,0px)) max(20px,env(safe-area-inset-right,0px)) calc(20px + env(safe-area-inset-bottom,0px)) max(20px,env(safe-area-inset-left,0px))}
+.g-card{width:100%;max-width:400px;display:flex;flex-direction:column;gap:14px}
+.g-icon{width:64px;height:64px;border-radius:15px}
+.g-card h2{font-family:var(--body);font-size:24px;margin:0}
+.g-card form{display:flex;flex-direction:column;gap:10px}
+.g-card p{margin:0;line-height:1.5;color:var(--muted)}
+.g-card label{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600}
+.g-card input{font:18px var(--body);padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--fg)}
+.g-card input:focus{outline:2px solid var(--accent);outline-offset:1px}
+.g-card button.primary{justify-content:center;padding:14px}
+.g-msg{color:var(--bad)!important;font-weight:500}
+.g-msg.good{color:var(--ok)!important}
+
+form.row .p-in{flex:1 1 auto}
+form.row button.primary{flex:0 0 auto;padding:12px 18px}
+
+.banner{top:calc(var(--top-h, 48px) + 8px)}
+.pill.update span{white-space:nowrap}.pill.update button{flex:none}

@@ -1,13 +1,15 @@
 // Flightroute service worker.
 // The app's own files are stored as one complete set per version and always served from that set,
 // so the page and its code can never come from different versions. A new version downloads in full
-// in the background; once it is ready it takes over and the page reloads once.
+// in the background and waits; the app shows an Update button, and tapping it switches to the new
+// version and reloads. Bump VERSION whenever any file in FILES changes.
 // Map tiles and fonts are stored separately by app.js ('fieldline-tiles-v1') and are not touched here.
-const VERSION = 25;
+const VERSION = 26;
 const SHELL = 'fieldline-shell-v' + VERSION;
 const RUNTIME = 'fieldline-runtime-v1';
 const FILES = [
-  './', 'app.js', 'app.css', 'manifest.webmanifest', 'airports.json',
+  './', 'app.js', 'app.css', 'config.js', 'manifest.webmanifest', 'airports.json',
+  'vendor/supabase.js',
   'vendor/maplibre-gl.js', 'vendor/maplibre-gl.css',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png',
   'screenshots/map.jpg', 'screenshots/plan.jpg', 'screenshots/flight.jpg'
@@ -29,8 +31,17 @@ self.addEventListener('install', e => {
       if (!r.ok) throw new Error(f + ' ' + r.status);
       await cache.put(f, await clean(r));
     }));
-    await self.skipWaiting();
+    // Versions before 26 had no Update button and can't ask this one to take over, so switch straight away
+    // from those. From 26 on, the new version waits until the person taps Update.
+    const old = (await caches.keys()).map(k => +(k.match(/^fieldline-shell-v(\d+)$/) || [])[1]).filter(Boolean);
+    if (old.length && Math.max(...old.filter(v => v !== VERSION), 0) < 26 && old.some(v => v !== VERSION)) await self.skipWaiting();
   })());
+});
+
+self.addEventListener('message', e => {
+  const d = e.data || {};
+  if (d.type === 'SKIP_WAITING') self.skipWaiting();
+  if (d.type === 'GET_VERSION' && e.ports && e.ports[0]) e.ports[0].postMessage({ version: VERSION });
 });
 
 self.addEventListener('activate', e => {

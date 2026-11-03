@@ -19,12 +19,14 @@
 <div id="map" aria-label="Map"></div>
 
 <div class="topbar">
+  <button class="pill gear" id="bSettings" aria-label="Settings" title="Settings"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M19.4 13a7.5 7.5 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.6 7.6 0 0 0-1.7-1L15 3.5h-4l-.4 2.5a7.6 7.6 0 0 0-1.7 1l-2.4-1-2 3.4L6.6 11a7.5 7.5 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.6 7.6 0 0 0 1.7 1l.4 2.5h4l.4-2.5a7.6 7.6 0 0 0 1.7-1l2.4 1 2-3.4zM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z"/></svg></button>
   <div class="brand">Flight<span>route</span></div>
   <div class="pill gps" id="status" data-s="search" data-q="0" title="GPS signal"><span class="bars" aria-hidden="true"><i></i><i></i><i></i><i></i></span><span id="statusText">Starting</span></div>
   <div class="pill flight" id="flight" hidden><svg viewBox="0 0 64 64" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M32 2l3.5 7v16L61 40v5L35.5 38 35 51l9 6.5v4L32 58.5 20 61.5v-4l9-6.5-.5-13L3 45v-5l25.5-15V9z"/></svg><span id="flightText"></span></div>
   <div class="pill rec" id="recPill" hidden><span class="dot"></span><span id="recText">Recording</span></div>
   <button class="pill sim" id="simPill" hidden>Simulated flight · Stop</button>
   <div class="pill net" id="net" hidden>Offline</div>
+  <div class="pill update" id="update" hidden></div>
 </div>
 
 <div class="banner" id="banner" hidden></div>
@@ -112,14 +114,52 @@
   <div class="row"><button class="primary" id="bSaveArea">Save this area</button></div>
   <h3>Check this view</h3>
   <p>Shows how much of the map on screen is saved on this phone, zoom level by zoom level. Close this panel, frame the area, then reopen and tap Check.</p>
-  <div class="row"><button id="bCheck">Check what's saved here</button><button id="bDiag">Copy diagnostics</button></div>
-  <textarea id="diagOut" class="diag" readonly hidden aria-label="Diagnostics"></textarea>
+  <div class="row"><button id="bCheck">Check what's saved here</button></div>
   <div class="table-wrap" id="checkOut" hidden></div>
   <h3>Saved maps</h3>
   <ul class="areas" id="areas"></ul>
   <div class="row"><button class="danger" id="bClear">Delete all offline maps</button></div>
-  <div class="row"><button id="bAbout">About &amp; install</button></div>
-  <p class="ver">Flightroute version 25 · 3 Nov 2026</p>
+</section>
+
+<section class="sheet" id="pSettings" hidden aria-labelledby="hSet">
+  <div class="sheet-head"><h2 id="hSet">Settings</h2><button class="x" data-close aria-label="Close">✕</button></div>
+  <div id="sAccount"></div>
+  <h3>Units</h3>
+  <div class="row"><button id="sMetric">Metric (km, km/h, m)</button><button id="sImperial">Imperial (mi, mph, ft)</button></div>
+  <h3>Route library</h3>
+  <label class="switch" for="tShare">
+    <input type="checkbox" id="tShare" checked>
+    <span class="track" aria-hidden="true"></span>
+    <span><b>Share my flights to the route library</b>After an automatically recorded flight, its path (without times) is added to the public route library, so anyone planning the same trip follows the real route. Uploads wait until you're signed in and online.</span>
+  </label>
+  <p class="hint" id="sLib"></p>
+  <h3>Updates</h3>
+  <p class="hint" id="sVer">Flightroute version 26 · 3 Nov 2026</p>
+  <div class="row"><button id="bCheckUpdate">Check for updates</button></div>
+  <h3>Help</h3>
+  <div class="row"><button id="bAbout">About &amp; install</button><button id="bDiag">Copy diagnostics</button></div>
+  <textarea id="diagOut" class="diag" readonly hidden aria-label="Diagnostics"></textarea>
+</section>
+
+<section class="gate" id="gate" hidden aria-labelledby="hGate">
+  <div class="g-card">
+    <img src="icons/icon-192.png" alt="" width="64" height="64" class="g-icon">
+    <h2 id="hGate">Sign in to Flightroute</h2>
+    <form id="gSend">
+      <p>Flightroute is invite-only. Enter your email and we'll send you a 6-digit code. There's no password.</p>
+      <label for="gEmail">Email</label>
+      <input id="gEmail" type="email" autocomplete="email" autocapitalize="none" spellcheck="false" placeholder="you@example.com">
+      <button class="primary" type="submit" id="gSendBtn">Send me a code</button>
+    </form>
+    <form id="gVerify" hidden>
+      <p>We sent a code to <b id="gTo"></b>. It can take a minute, so check your spam folder too.</p>
+      <label for="gCode">Code</label>
+      <input id="gCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="10" placeholder="123456">
+      <button class="primary" type="submit" id="gVerifyBtn">Sign in</button>
+      <div class="row"><button type="button" id="gResend">Send a new code</button><button type="button" id="gBack">Use a different email</button></div>
+    </form>
+    <p class="g-msg" id="gMsg" hidden></p>
+  </div>
 </section>
 
 <section class="sheet" id="pTracks" hidden aria-labelledby="hTr">
@@ -218,6 +258,8 @@
 <div class="toast" id="toast" hidden></div>
 
 <script src="vendor/maplibre-gl.js"></script>
+<script src="config.js"></script>
+<script src="vendor/supabase.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
