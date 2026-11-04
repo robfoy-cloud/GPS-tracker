@@ -280,3 +280,6 @@ form.row button.primary{flex:0 0 auto;padding:12px 18px}
 /* If an iPhone home-screen app leaves a strip below the fixed panels, it shows the page background:
    colour it like the panel so it reads as part of the panel */
 html,body{background:var(--panel)}
+/* Sign-in: buttons keep their natural height (the row rule that stretches buttons doesn't apply in a column) */
+.g-card form button,.g-card form button.primary{flex:0 0 auto}
+.g-card .row button{flex:1 1 0}

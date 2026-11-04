@@ -706,7 +706,10 @@ async function exportGPX(t){
   const a=document.createElement('a'); a.href=URL.createObjectURL(file); a.download=name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),4000);
 }
 $('fImp').onchange=async e=>{
+  // No file-type filter on the picker: iPhones and iPads grey out .gpx files unless an app has claimed the type,
+  // so any file can be chosen and it's checked here instead.
   const f=e.target.files[0]; if(!f) return;
+  if(f.size>20e6){ toast('That file is too large to be a GPX track.'); e.target.value=''; return; }
   try{
     const doc=new DOMParser().parseFromString(await f.text(),'application/xml');
     const pts=[...doc.getElementsByTagName('trkpt'),...doc.getElementsByTagName('rtept')].map(n=>{
